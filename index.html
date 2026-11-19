@@ -1,0 +1,1059 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0B0B0C" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="apple-touch-icon" href="./static/icons/icon-192.png" />
+  <title>MRL</title>
+  <link rel="icon" type="image/x-icon" href="./static/mrl_icon.ico" />
+  <link rel="stylesheet" href="./static/fonts.css?v=1" />
+  <script>try{if(localStorage.getItem("mrl-theme")==="light")document.documentElement.dataset.theme="light";if(localStorage.getItem("mrl-en-mode")!=="0")document.documentElement.classList.add("en-mode-on");if(localStorage.getItem("mrl-app-lang")==="en")document.documentElement.dataset.lang="en";}catch(e){}</script>
+  <link rel="stylesheet" href="./static/styles.css?v=32" />
+  <link rel="stylesheet" href="./static/mobile.css?v=2" />
+  <meta name="mrl-build" content="20261119025753" />
+</head>
+<body spellcheck="false">
+<input type="file" id="excel-import-input" accept=".xlsx,.xlsm" class="hidden" />
+<input type="file" id="canvas-image-file-input" accept="image/*" class="hidden" />
+
+<!-- ================= STARTUP PORTAL (4 PHÂN HỆ ĐỘC LẬP) ================= -->
+<div id="portal-screen" class="portal-screen">
+  <header class="portal-topbar">
+    <div class="portal-brand">
+      <span class="brand-mark"></span>
+      <span class="brand-name">MRL</span>
+      <span id="portal-brand-sub" class="portal-subtag">WORKBENCH · 134 MỤC</span>
+    </div>
+    <div class="portal-top-right">
+      <button type="button" id="portal-streak-badge" class="streak-pill" onclick="enterWorkspace('english', 'en-quiz')" title="Chuỗi ngày học &amp; Mục tiêu Tiếng Anh hôm nay">
+        <span class="streak-flame">🔥</span>
+        <span class="streak-days" data-streak-days>0 ngày liên tiếp</span>
+        <span class="streak-sep">·</span>
+        <span class="streak-goal" data-streak-goal>Hôm nay: 0/15 thẻ</span>
+        <span class="streak-mini-bar"><i data-streak-bar style="width:0%"></i></span>
+      </button>
+      <span id="portal-global-meta" class="mono portal-meta-txt hidden">134 MỤC</span>
+      <div class="lang-switch" role="group" aria-label="Ngôn ngữ / Language">
+        <button type="button" class="lang-btn active" data-lang-btn="vi" onclick="setAppLanguage('vi')" title="Tiếng Việt">VI</button>
+        <button type="button" class="lang-btn" data-lang-btn="en" onclick="setAppLanguage('en')" title="English (100% UI &amp; Content)">EN</button>
+      </div>
+      <button type="button" id="portal-btn-en-mode" class="btn btn-sm split-on" onclick="toggleEnMode()" title="Bật/tắt chế độ học Tiếng Anh song ngữ (quét chữ dịch, gạch chân thuật ngữ)">🇬🇧 EN: BẬT</button>
+      <button type="button" id="portal-btn-en-vocab" class="btn btn-sm hidden" onclick="openVocabModal()" title="Mở Sổ từ vựng Tiếng Anh chuyên ngành">⭐ <span class="en-vocab-pill-lbl">Từ vựng</span> (<span class="en-vocab-count">0</span>)</button>
+      <button type="button" id="portal-btn-mobile-sync" class="btn btn-sm" onclick="openMobileSyncModal()" title="Mở mã QR Mobile, Đồng bộ Cloud 2 chiều &amp; Xuất gói PWA">📱 Mobile &amp; Cloud Sync</button>
+      <button type="button" class="btn btn-sm" onclick="triggerExcelImport()">Nhập Excel</button>
+      <button type="button" class="btn btn-sm" onclick="exportExcel()">Xuất Excel</button>
+    </div>
+  </header>
+
+  <div class="portal-body">
+    <div class="portal-container">
+      <div class="portal-hero">
+        <div class="portal-kicker">INDUSTRIAL ENGINEERING HUB</div>
+        <h1 class="portal-h1">Chọn phân hệ làm việc</h1>
+        <p class="portal-lead">Mỗi phân hệ được tách riêng hoàn toàn dữ liệu, bộ lọc tra cứu, thống kê tiến độ và bộ thẻ ôn tập chuyên ngành.</p>
+      </div>
+      <div id="portal-grid" class="portal-grid"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= WORKSPACE SHELL ================= -->
+<div id="app-shell" class="app hidden">
+
+  <!-- ================= SIDEBAR ================= -->
+  <aside class="sidebar">
+    <div class="ws-nav-head">
+      <div class="ws-nav-top">
+        <button type="button" class="portal-back-btn" onclick="openPortalScreen()" title="Quay về màn hình chọn 4 phân hệ (Alt+Home)">← Màn hình chính</button>
+        <button type="button" class="sidebar-hide-btn" onclick="toggleLeftSidebar()" title="Ẩn thanh menu dọc bên trái (Ctrl+B)">« Ẩn</button>
+      </div>
+      <div class="ws-switcher" aria-label="Chuyển nhanh phân hệ">
+        <button type="button" id="ws-pill-mrl" class="ws-pill" onclick="enterWorkspace('mrl')">MRL</button>
+        <button type="button" id="ws-pill-plc" class="ws-pill" onclick="enterWorkspace('plc')">PLC</button>
+        <button type="button" id="ws-pill-network" class="ws-pill" onclick="enterWorkspace('network')">NET</button>
+        <button type="button" id="ws-pill-english" class="ws-pill" onclick="enterWorkspace('english')">ENG</button>
+      </div>
+    </div>
+
+    <div class="brand">
+      <span class="brand-mark"></span>
+      <span id="sidebar-brand-name" class="brand-name">MRL</span>
+      <span id="sidebar-brand-sub" class="brand-sub">OFFLINE HUB</span>
+    </div>
+
+    <nav id="sidebar-nav" class="nav"></nav>
+
+    <div class="side-section">
+      <div id="sidebar-stats-title" class="side-title">THỐNG KÊ HỆ THỐNG</div>
+      <div id="header-metrics"><div class="stat-row"><span>Đang tải...</span></div></div>
+    </div>
+
+    <div id="sidebar-actions" class="side-actions"></div>
+  </aside>
+
+  <!-- ================= MAIN (TIA PORTAL TAB STRIP + SPLIT WORKSPACE) ================= -->
+  <main class="main">
+    <div id="editor-tabstrip" class="editor-tabstrip">
+      <div id="editor-tabs-list" class="editor-tabs-list"></div>
+      <div class="tabstrip-actions">
+        <button type="button" id="workspace-streak-badge" class="streak-pill compact" onclick="enterWorkspace('english', 'en-quiz')" title="Chuỗi ngày học &amp; Mục tiêu Tiếng Anh hôm nay">
+          <span class="streak-flame">🔥</span>
+          <span class="streak-days" data-streak-days>0 ngày</span>
+          <span class="streak-sep">·</span>
+          <span class="streak-goal" data-streak-goal>0/15</span>
+          <span class="streak-mini-bar"><i data-streak-bar style="width:0%"></i></span>
+        </button>
+        <button type="button" id="btn-clear-tabs" class="btn btn-sm hidden" onclick="closeAllEditorTabs(event)" title="Đóng các tab không dùng">× Đóng bớt</button>
+        <div class="lang-switch" role="group" aria-label="Ngôn ngữ / Language">
+          <button type="button" class="lang-btn active" data-lang-btn="vi" onclick="setAppLanguage('vi')" title="Tiếng Việt">VI</button>
+          <button type="button" class="lang-btn" data-lang-btn="en" onclick="setAppLanguage('en')" title="English (100% UI &amp; Content)">EN</button>
+        </div>
+        <button type="button" id="btn-en-mode" class="btn btn-sm split-on" onclick="toggleEnMode()" title="Bật/tắt chế độ học Tiếng Anh song ngữ (quét chữ dịch, gạch chân thuật ngữ)">🇬🇧 EN: BẬT</button>
+        <button type="button" id="en-top-ai-cfg-btn" class="btn btn-sm hidden" onclick="openAiConfigModal()" title="Cấu hình Gemini API Key miễn phí từ Google AI Studio">🔑 Cấu hình Gemini API Key</button>
+        <button type="button" id="btn-en-vocab" class="btn btn-sm" onclick="openVocabModal()" title="Sổ từ vựng Tiếng Anh chuyên ngành">⭐ <span class="en-vocab-pill-lbl">Từ vựng</span> (<span class="en-vocab-count">0</span>)</button>
+        <button type="button" id="btn-split-vertical" class="btn btn-sm" onclick="toggleSplitMode('vertical')" title="Chia đôi Trái / Phải giống TIA Portal (Ctrl+\)">◫ Chia đôi</button>
+        <button type="button" id="btn-split-horizontal" class="btn btn-sm" onclick="toggleSplitMode('horizontal')" title="Chia Trên / Dưới">⬓ Trên/Dưới</button>
+        <button type="button" id="btn-swap-panes" class="btn btn-sm hidden" onclick="swapSplitPanes()" title="Đổi nội dung giữa Khung 1 và Khung 2">⇄ Đổi bên</button>
+        <button type="button" id="btn-close-split" class="btn btn-sm btn-danger hidden" onclick="closeSplitPane()" title="Đóng khung chia đôi">× Đóng chia</button>
+      </div>
+    </div>
+
+    <div id="workspace-body" class="workspace-body">
+      <div id="pane-primary" class="editor-pane active-pane" onmousedown="setActivePane('primary')">
+        <div id="pane1-bar" class="pane-head hidden">
+          <span class="pane-tag">KHUNG 1</span>
+          <span id="pane1-label" class="pane-label mono">ĐANG XEM</span>
+          <div class="pane-head-actions">
+            <button type="button" class="btn btn-sm" onclick="pinPrimaryToSecondary(event)" title="Đưa bài này sang Khung 2">◫ Ghim sang Khung 2 →</button>
+          </div>
+        </div>
+        <div class="pane-views">
+          <div id="mobile-subbar" class="hidden"></div>
+          <div id="view-mobile-sync" class="hidden"></div>
+
+    <!-- 01 NHẬT KÝ CA SỬA CHỮA -->
+    <section id="view-repairs" class="view tab-view">
+      <div class="toolbar">
+        <button type="button" class="btn btn-sm sidebar-open-btn" onclick="toggleLeftSidebar()" title="Hiện/Ẩn thanh menu dọc bên trái (Ctrl+B)">☰ Menu</button>
+        <div id="repair-category-pills" class="chips"></div>
+        <div class="vsep"></div>
+        <select id="repair-status-filter" class="sel" onchange="onRepairFilterChange()">
+          <option value="ALL">Trạng thái: tất cả</option>
+          <option value="mastered">Đã làm chủ</option>
+          <option value="review">Cần xem lại</option>
+          <option value="researching">Đang nghiên cứu</option>
+          <option value="unclassified">Chưa phân loại</option>
+        </select>
+        <div class="search">
+          <input id="repair-search-input" class="inp" type="text" oninput="onRepairFilterChange()" placeholder="Tìm mã máy, linh kiện (A3120), mã lỗi..." />
+          <button id="repair-search-clear" class="search-x hidden" onclick="clearRepairSearch()">×</button>
+        </div>
+      </div>
+      <div class="split">
+        <div class="list-pane">
+          <div class="list-head"><span>DANH SÁCH CA BỆNH</span><b id="repair-list-count">0</b></div>
+          <div id="repair-list" class="list-body"></div>
+        </div>
+        <div id="repair-detail" class="detail-pane"></div>
+      </div>
+    </section>
+
+    <!-- 02 KIẾN THỨC & SOP -->
+    <section id="view-knowledge" class="view tab-view hidden">
+      <div class="toolbar">
+        <button type="button" class="btn btn-sm sidebar-open-btn" onclick="toggleLeftSidebar()" title="Hiện/Ẩn thanh menu dọc bên trái (Ctrl+B)">☰ Menu</button>
+        <div id="knowledge-group-pills" class="chips"></div>
+        <div class="vsep"></div>
+        <div id="knowledge-mode-pills" class="chips"></div>
+        <select id="knowledge-category-filter" class="sel" style="max-width:185px;" onchange="onKnowledgeFilterChange()">
+          <option value="ALL">Phân loại: tất cả</option>
+        </select>
+        <select id="knowledge-status-filter" class="sel" onchange="onKnowledgeFilterChange()">
+          <option value="ALL">Trạng thái: tất cả</option>
+          <option value="mastered">Đã làm chủ</option>
+          <option value="review">Cần xem lại</option>
+          <option value="researching">Đang nghiên cứu</option>
+          <option value="unclassified">Chưa phân loại</option>
+        </select>
+        <div class="search">
+          <input id="knowledge-search-input" class="inp" type="text" oninput="onKnowledgeFilterChange()" placeholder="Tìm chủ đề, từ khóa, quy trình..." />
+          <button id="knowledge-search-clear" class="search-x hidden" onclick="clearKnowledgeSearch()">×</button>
+        </div>
+      </div>
+      <div class="split">
+        <div class="list-pane">
+          <div class="list-head"><span>DANH MỤC KIẾN THỨC &amp; SOP</span><b id="knowledge-list-count">0</b></div>
+          <div id="knowledge-list" class="list-body"></div>
+        </div>
+        <div id="knowledge-detail" class="detail-pane"></div>
+      </div>
+    </section>
+
+    <!-- 03 LẬP TRÌNH & HỆ THỐNG PLC -->
+    <section id="view-plc" class="view tab-view hidden">
+      <div class="toolbar">
+        <button type="button" class="btn btn-sm sidebar-open-btn" onclick="toggleLeftSidebar()" title="Hiện/Ẩn thanh menu dọc bên trái (Ctrl+B)">☰ Menu</button>
+        <div id="plc-category-pills" class="chips"></div>
+        <div class="vsep"></div>
+        <select id="plc-status-filter" class="sel" onchange="onPlcFilterChange()">
+          <option value="ALL">Trạng thái: tất cả</option>
+          <option value="mastered">Đã làm chủ</option>
+          <option value="review">Cần xem lại</option>
+          <option value="researching">Đang nghiên cứu</option>
+        </select>
+        <div class="search">
+          <input id="plc-search-input" class="inp" type="text" oninput="onPlcFilterChange()" placeholder="Tìm khối hàm (FB/FC/OB), SCL..." />
+          <button id="plc-search-clear" class="search-x hidden" onclick="clearPlcSearch()">×</button>
+        </div>
+        <button class="btn btn-sm btn-primary" onclick="openPlcModal()">+ Thêm bài PLC</button>
+      </div>
+      <div class="split">
+        <div class="list-pane">
+          <div class="list-head"><span>LẬP TRÌNH &amp; HỆ THỐNG PLC</span><b id="plc-list-count">0</b></div>
+          <div id="plc-list" class="list-body"></div>
+        </div>
+        <div id="plc-detail" class="detail-pane"></div>
+      </div>
+    </section>
+
+    <!-- 04 MẠNG TRUYỀN THÔNG CÔNG NGHIỆP -->
+    <section id="view-network" class="view tab-view hidden">
+      <div class="toolbar">
+        <button type="button" class="btn btn-sm sidebar-open-btn" onclick="toggleLeftSidebar()" title="Hiện/Ẩn thanh menu dọc bên trái (Ctrl+B)">☰ Menu</button>
+        <div id="network-protocol-pills" class="chips"></div>
+        <div class="vsep"></div>
+        <select id="network-status-filter" class="sel" onchange="onNetworkFilterChange()">
+          <option value="ALL">Trạng thái: tất cả</option>
+          <option value="mastered">Đã làm chủ</option>
+          <option value="review">Cần xem lại</option>
+          <option value="researching">Đang nghiên cứu</option>
+        </select>
+        <div class="search">
+          <input id="network-search-input" class="inp" type="text" oninput="onNetworkFilterChange()" placeholder="Tìm giao thức, thiết bị, thanh ghi..." />
+          <button id="network-search-clear" class="search-x hidden" onclick="clearNetworkSearch()">×</button>
+        </div>
+        <button class="btn btn-sm btn-primary" onclick="openNetworkModal()">+ Thêm cấu hình mạng</button>
+      </div>
+      <div class="split">
+        <div class="list-pane">
+          <div class="list-head"><span>MẠNG TRUYỀN THÔNG</span><b id="network-list-count">0</b></div>
+          <div id="network-list" class="list-body"></div>
+        </div>
+        <div id="network-detail" class="detail-pane"></div>
+      </div>
+    </section>
+
+    <!-- 05 TỪ ĐIỂN LINH KIỆN & MÃ LỖI -->
+    <section id="view-dictionary" class="view tab-view hidden">
+      <div class="toolbar">
+        <button type="button" class="btn btn-sm sidebar-open-btn" onclick="toggleLeftSidebar()" title="Hiện/Ẩn thanh menu dọc bên trái (Ctrl+B)">☰ Menu</button>
+        <span class="sec-title">TRA CỨU LIÊN KẾT CHÉO LINH KIỆN &amp; MÃ LỖI (MRL)</span>
+        <span style="color:var(--text-3); font-size:12px;">Chọn một mã để xem toàn bộ ca sửa chữa và kiến thức SOP liên quan trong phân hệ MRL.</span>
+        <div class="search">
+          <input id="dict-search-input" class="inp" type="text" oninput="renderDictionaryView()" placeholder="Lọc nhanh mã linh kiện (A3120, IGBT) hoặc mã lỗi (oPE04)..." />
+        </div>
+      </div>
+      <div class="scroll-view">
+        <div class="dict-wrap">
+          <div class="dict-col">
+            <div class="col-head"><span>DANH MỤC LINH KIỆN &amp; IC</span><span id="dict-comp-count">0</span></div>
+            <div id="dict-comp-grid"></div>
+          </div>
+          <div class="dict-col">
+            <div class="col-head"><span>DANH MỤC MÃ LỖI THIẾT BỊ</span><span id="dict-fault-count">0</span></div>
+            <div id="dict-fault-grid"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 06 ÔN TẬP CHỦ ĐỘNG -->
+    <section id="view-flashcards" class="view tab-view hidden">
+      <div class="toolbar">
+        <button type="button" class="btn btn-sm sidebar-open-btn" onclick="toggleLeftSidebar()" title="Hiện/Ẩn thanh menu dọc bên trái (Ctrl+B)">☰ Menu</button>
+        <span class="sec-title">ÔN TẬP SÂU</span>
+        <select id="fc-mode-filter" class="sel" data-no-filter-menu="1" onchange="onFlashcardModeChange()">
+          <option value="deep">Hỏi sâu từng ý</option>
+          <option value="quiz">Trắc nghiệm 4 đáp án (Quiz)</option>
+          <option value="summary">Tổng hợp (1 thẻ / bài)</option>
+          <option value="en_vocab">🇬🇧 Từ vựng Tiếng Anh chuyên ngành (Việt ⇄ Anh)</option>
+          <option value="en_quiz">🇬🇧 Trắc nghiệm Tiếng Anh (Quiz A/B/C/D)</option>
+        </select>
+        <select id="fc-status-filter" class="sel" onchange="buildFlashcardDeck()">
+          <option value="ACTIVE">Cần xem lại + đang nghiên cứu</option>
+          <option value="review">Chỉ cần xem lại</option>
+          <option value="researching">Chỉ đang nghiên cứu</option>
+          <option value="ALL">Tất cả (kể cả đã làm chủ)</option>
+        </select>
+        <select id="fc-type-filter" class="sel" onchange="buildFlashcardDeck()">
+          <option value="ALL">Tất cả loại thẻ</option>
+          <option value="repair">Chỉ ca sửa chữa</option>
+          <option value="knowledge">Chỉ kiến thức &amp; SOP</option>
+          <option value="plc">Chỉ lập trình PLC</option>
+          <option value="network">Chỉ mạng truyền thông</option>
+        </select>
+        <button type="button" id="fc-unsolid-btn" class="btn btn-sm" onclick="toggleFlashcardUnsolidFilter()" title="Chỉ hiện các câu chưa đánh dấu Thuộc chắc">Lọc câu chưa thuộc</button>
+        <button type="button" id="fc-draft-toggle-btn" class="btn btn-sm split-on" onclick="toggleFlashcardDraftBox()" title="Bật/tắt khung tự gõ câu trả lời trước khi lật thẻ">Ô tự gõ</button>
+        <button type="button" class="btn btn-sm" onclick="shuffleFlashcardDeck()">Trộn thẻ</button>
+        <span id="fc-item-scope-badge" class="fc-scope-badge hidden"></span>
+        <div id="fc-progress-summary" class="mono" style="margin-left:auto; font-size:12px; color:var(--text-3);"></div>
+      </div>
+      <div class="scroll-view"><div id="flashcard-stage" class="fc-wrap"></div></div>
+    </section>
+
+    <!-- VỞ NHÁP TỰ DO (MRL / PLC / NETWORK / ENGLISH ĐỘC LẬP) -->
+    <section id="view-scratchpad" class="view tab-view hidden">
+      <div class="toolbar">
+        <button type="button" class="btn btn-sm sidebar-open-btn" onclick="toggleLeftSidebar()" title="Hiện/Ẩn thanh menu dọc bên trái (Ctrl+B)">☰ Menu</button>
+        <span id="scratchpad-title" class="sec-title">VỞ NHÁP GHI CHÚ NHANH</span>
+        <span style="color:var(--text-3); font-size:12px;">Gõ tự do · Bôi đen từ để dịch &amp; lưu · Dán ảnh (<kbd>Ctrl</kbd>+<kbd>V</kbd>) kéo thả tự do</span>
+        <span id="scratchpad-status" class="mono" style="margin-left:auto; font-size:12px; color:var(--green);">ĐÃ LƯU TỰ ĐỘNG</span>
+        <button type="button" id="scratchpad-sample-manual-btn" class="btn btn-sm hidden" onclick="insertSampleManualToScratchpad()" title="Chèn đoạn trích Manual tiếng Anh mẫu để đọc dịch &amp; làm Quiz">📄 Nạp mẫu Manual</button>
+        <button type="button" id="scratchpad-to-quiz-btn" class="btn btn-sm btn-indigo hidden" onclick="sendScratchpadTextToOpenQuiz()" title="Chuyển văn bản trong Vở Nháp sang OpenQuiz AI để sinh bộ đề tự động">⚡ Tạo Quiz từ Nháp</button>
+        <button type="button" class="btn btn-sm" onclick="triggerScratchpadImagePick()">+ Chèn ảnh</button>
+        <button type="button" id="scratchpad-font-btn" class="btn btn-sm" onclick="toggleScratchpadFont()">Font: Chữ thường</button>
+        <button type="button" class="btn btn-sm btn-primary" onclick="saveScratchpadNow(true)">Lưu (Ctrl+S)</button>
+        <button type="button" class="btn btn-sm btn-danger" onclick="clearScratchpad()">Xóa trắng</button>
+      </div>
+      <div class="scratchpad-wrap">
+        <div id="scratchpad-canvas" class="scratchpad-canvas" tabindex="0">
+          <textarea id="scratchpad-textarea" class="scratchpad-textarea" spellcheck="false" placeholder="Viết nhanh ý tưởng, tóm tắt video/datasheet, tính toán thanh ghi, hoặc dán đoạn Manual tiếng Anh để bôi đen dịch &amp; lưu từ mới...&#10;&#10;Mẹo: Bấm Win+Shift+S chụp trang tài liệu/datasheet rồi click vào đây nhấn Ctrl+V để dán ảnh trực tiếp, sau đó kéo đặt ảnh ở bất kỳ vị trí nào bạn muốn!"></textarea>
+          <div id="scratchpad-images-layer" class="canvas-images-layer"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 04-01 HỌC HÔM NAY (SRS & 4 CHẾ ĐỘ: FLASHCARD / QUIZ / CLOZE / NGHE CHÉP) -->
+    <section id="view-en-quiz" class="view tab-view hidden">
+      <div class="toolbar">
+        <button type="button" class="btn btn-sm sidebar-open-btn" onclick="toggleLeftSidebar()" title="Hiện/Ẩn thanh menu dọc bên trái (Ctrl+B)">☰ Menu</button>
+        <span class="sec-title" style="color:#818CF8;">01 · HỌC HÔM NAY</span>
+        <div id="en-quiz-type-pills" class="chips"></div>
+        <button type="button" id="en-quiz-gen-toggle-btn" class="btn btn-sm btn-indigo" onclick="toggleEnQuizGeneratorPanel()" title="Ẩn/hiện khung Tạo đề OpenQuizAI">⚡ Tạo đề tự động</button>
+      </div>
+      <div id="en-quiz-compact-bar" class="srs-compact-bar">
+        <div id="en-quiz-streak-pill" class="srs-compact-streak" title="Chuỗi ngày học &amp; Mục tiêu Tiếng Anh hôm nay">
+          <span class="streak-flame">🔥</span>
+          <span class="streak-days" data-streak-days>0 ngày</span>
+          <span class="streak-sep">·</span>
+          <span id="en-quiz-today-goal">Hôm nay: 0/15</span>
+          <span class="streak-mini-bar"><i data-streak-bar style="width:0%"></i></span>
+        </div>
+        <div id="en-quiz-srs-pills" class="srs-compact-pills"></div>
+        <div class="srs-compact-topic">
+          <select id="en-quiz-cat-filter" class="sel" data-no-filter-menu="1" onchange="onEnQuizFilterChange()">
+            <option value="ALL">Chủ đề: Tất cả</option>
+            <option value="Giao tiếp & Hội thoại">Giao tiếp &amp; Hội thoại</option>
+            <option value="Lexical Chunks (Cụm từ nối)">Lexical Chunks (Cụm từ nối)</option>
+            <option value="Biến tần & Phần cứng">Biến tần &amp; Phần cứng</option>
+            <option value="PLC & Tự động hóa">PLC &amp; Tự động hóa</option>
+            <option value="Mạng truyền thông">Mạng truyền thông</option>
+            <option value="Giao tiếp Phỏng vấn">Giao tiếp Phỏng vấn</option>
+          </select>
+        </div>
+      </div>
+      <div class="scroll-view">
+        <div id="en-quiz-container" class="en-hub-wrap"></div>
+      </div>
+    </section>
+
+    <!-- 04-02 PHÒNG THỰC CHIẾN (A: GIAO TIẾP · B: DỊCH KỸ THUẬT · C: PHỎNG VẤN 1-1 · D: ĐỌC HIỂU MANUAL) -->
+    <section id="view-en-coach" class="view tab-view hidden">
+      <div class="toolbar">
+        <button type="button" class="btn btn-sm sidebar-open-btn" onclick="toggleLeftSidebar()" title="Hiện/Ẩn thanh menu dọc bên trái (Ctrl+B)">☰ Menu</button>
+        <span class="sec-title" style="color:#818CF8;">02 · PHÒNG THỰC CHIẾN</span>
+        <div id="en-coach-mode-pills" class="chips"></div>
+        <div id="en-coach-combat-controls" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <select id="en-coach-source-filter" class="sel" data-no-filter-menu="1" onchange="pickRandomCoachPrompt()">
+            <option value="ALL">Chủ đề: Tất cả (Giao tiếp + Kỹ thuật)</option>
+            <option value="Giao tiếp & Hội thoại">Giao tiếp &amp; Hội thoại</option>
+            <option value="Lexical Chunks (Cụm từ nối)">Lexical Chunks (Cụm từ nối)</option>
+            <option value="Biến tần & Phần cứng">Biến tần &amp; Phần cứng</option>
+            <option value="PLC & Tự động hóa">PLC &amp; Tự động hóa</option>
+            <option value="Mạng truyền thông">Mạng truyền thông</option>
+            <option value="Giao tiếp Phỏng vấn">Giao tiếp Phỏng vấn</option>
+          </select>
+          <button type="button" class="btn btn-sm btn-indigo" onclick="pickRandomCoachPrompt()">🎲 Tình huống khác</button>
+          <button type="button" class="btn btn-sm" onclick="toggleCustomCoachPrompt()">✍️ Tự nhập câu</button>
+        </div>
+        <div id="en-coach-reading-controls" class="hidden" style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <select id="en-reading-count" class="sel" data-no-filter-menu="1">
+            <option value="5">5 từ mục tiêu</option>
+            <option value="7" selected>7 từ Cần ôn hôm nay</option>
+            <option value="10">10 từ tổng hợp</option>
+          </select>
+          <button type="button" id="en-reading-gen-btn" class="btn btn-sm btn-indigo" onclick="generateContextualReading()">📖 Tạo bài đọc từ 5-10 từ Cần ôn hôm nay</button>
+          <button type="button" id="en-reading-bilingual-btn" class="btn btn-sm" onclick="toggleReadingBilingual()">🇻🇳 Hiện dịch song ngữ</button>
+          <button type="button" class="btn btn-sm" onclick="speakFullReadingPassage()">🔊 Nghe đọc toàn bài</button>
+        </div>
+      </div>
+      <div class="scroll-view">
+        <div id="en-coach-container" class="en-hub-wrap"></div>
+      </div>
+    </section>
+
+    <!-- 04-03 PLACEHOLDER (ĐÃ TÍCH HỢP VÀO CHẾ ĐỘ D CỦA PHÒNG THỰC CHIẾN) -->
+    <section id="view-en-reading" class="view tab-view hidden"></section>
+
+    <!-- 04-03 KHO TỪ & NẠP TỪ AI (GỘP MAGIC FILL + QUÉT KHO MRL + DÁN MANUAL) -->
+    <section id="view-en-vocab-bank" class="view tab-view hidden">
+      <div class="toolbar">
+        <button type="button" class="btn btn-sm sidebar-open-btn" onclick="toggleLeftSidebar()" title="Hiện/Ẩn thanh menu dọc bên trái (Ctrl+B)">☰ Menu</button>
+        <div id="en-bank-category-pills" class="chips"></div>
+        <div class="vsep"></div>
+        <select id="en-bank-status-filter" class="sel" data-no-filter-menu="1" onchange="onEnBankFilterChange()">
+          <option value="ALL">SRS: Tất cả</option>
+          <option value="due_now">Cần ôn hôm nay</option>
+          <option value="learning">Đang học (Learning)</option>
+          <option value="new">Từ mới (New)</option>
+          <option value="review">Ôn tập (Review)</option>
+          <option value="mastered">Đã làm chủ (Mastered)</option>
+        </select>
+        <div class="search">
+          <input id="en-bank-search-input" class="inp" type="text" oninput="onEnBankFilterChange()" placeholder="Tìm thuật ngữ, IPA, Collocations, nghĩa Việt..." />
+          <button id="en-bank-search-clear" class="search-x hidden" onclick="clearEnBankSearch()">×</button>
+        </div>
+        <button type="button" class="btn btn-sm btn-indigo" onclick="openEnVocabEditorModal()">+ Thêm Từ / Chunk</button>
+        <button type="button" class="btn btn-sm" onclick="enterWorkspace('english', 'en-quiz')">🧠 Ôn Flashcard SRS</button>
+      </div>
+      <div id="en-vocab-ingest-bar" class="en-ingest-bar">
+        <span class="en-ingest-bar-lbl">⚡ NẠP TỪ NHANH:</span>
+        <div id="en-ingest-mode-pills" class="chips"></div>
+        <button type="button" id="en-ingest-close-btn" class="btn btn-sm hidden" onclick="toggleVocabIngestDrawer(false)" style="margin-left:auto;">✕ Thu gọn</button>
+      </div>
+      <div id="en-vocab-ingest-drawer" class="en-ingest-drawer hidden">
+        <div id="en-ingest-container" class="en-hub-wrap"></div>
+      </div>
+      <div class="split">
+        <div class="list-pane">
+          <div class="list-head"><span>KHO TỪ VỰNG &amp; LEXICAL CHUNKS</span><b id="en-bank-list-count">0</b></div>
+          <div id="en-bank-list" class="list-body"></div>
+        </div>
+        <div id="en-bank-detail" class="detail-pane"></div>
+      </div>
+    </section>
+
+    <!-- 04-05 PLACEHOLDER (ĐÃ GỘP VÀO THANH NẠP TỪ NHANH CỦA KHO TỪ 03) -->
+    <section id="view-en-ingest" class="view tab-view hidden"></section>
+        </div><!-- /.pane-views -->
+      </div><!-- /#pane-primary -->
+
+      <div id="split-resizer" class="split-resizer hidden" title="Kéo để chỉnh tỉ lệ Trái / Phải hoặc Trên / Dưới"></div>
+
+      <!-- KHUNG 2 ĐỘC LẬP (XUYÊN PHÂN HỆ MRL / PLC / NET / NHÁP) -->
+      <div id="pane-secondary" class="editor-pane pane-secondary hidden" onmousedown="setActivePane('secondary')">
+        <div class="pane-head pane2-head">
+          <span class="pane-tag">KHUNG 2</span>
+          <div class="pane2-pills" aria-label="Chọn nhanh nguồn dữ liệu cho Khung 2">
+            <button type="button" id="p2-pill-plc" class="pane2-pill" onclick="setPane2Group('plc')">PLC</button>
+            <button type="button" id="p2-pill-network" class="pane2-pill" onclick="setPane2Group('network')">NET</button>
+            <button type="button" id="p2-pill-repair" class="pane2-pill" onclick="setPane2Group('repair')">CA SỬA</button>
+            <button type="button" id="p2-pill-knowledge" class="pane2-pill" onclick="setPane2Group('knowledge')">SOP</button>
+            <button type="button" id="p2-pill-scratchpad" class="pane2-pill" onclick="setPane2Group('scratchpad')">NHÁP</button>
+          </div>
+          <select id="pane2-item-select" class="sel pane2-sel" onchange="onPane2SelectChange()"></select>
+          <div class="pane-head-actions">
+            <button type="button" id="pane2-browse-btn" class="btn btn-sm" onclick="togglePane2Browser()" title="Mở danh sách tìm kiếm nhanh xuyên phân hệ trong Khung 2">☰ Tìm bài</button>
+            <button type="button" class="btn btn-sm btn-danger" onclick="closeSplitPane()" title="Đóng Khung 2">×</button>
+          </div>
+        </div>
+        <div id="pane2-browser" class="pane2-browser hidden"></div>
+        <div id="pane2-content" class="pane2-content"></div>
+      </div>
+    </div><!-- /#workspace-body -->
+  </main>
+</div>
+
+<!-- ================= CROSS-REFERENCE DRAWER ================= -->
+<div id="crossref-overlay" class="overlay right hidden">
+  <div class="drawer">
+    <div class="ov-head">
+      <div class="ov-title"><small>TRA CỨU LIÊN KẾT CHÉO</small><span id="crossref-title">MÃ</span></div>
+      <button class="ov-x" onclick="closeCrossRefDrawer()">×</button>
+    </div>
+    <div id="crossref-body" class="ov-body"></div>
+  </div>
+</div>
+
+<!-- ================= MODAL: CA SỬA CHỮA ================= -->
+<div id="repair-modal" class="overlay center hidden">
+  <div class="modal">
+    <div class="ov-head">
+      <div class="ov-title" id="repair-modal-title"><span>THÊM CA SỬA CHỮA MỚI</span></div>
+      <button class="ov-x" onclick="closeRepairModal()">×</button>
+    </div>
+    <form id="repair-form" class="ov-body form" onsubmit="submitRepairForm(event)">
+      <input type="hidden" id="rep-form-id" />
+      <div class="fgrid c4">
+        <div>
+          <label class="lbl">Nhóm thiết bị *</label>
+          <select id="rep-form-category" class="sel" required>
+            <option value="VFD">VFD</option>
+            <option value="Circuit_Board">Bo mạch (Circuit_Board)</option>
+            <option value="Screen">HMI / màn hình (Screen)</option>
+            <option value="Servo">Servo</option>
+            <option value="PLC">PLC</option>
+            <option value="Sensors">Cảm biến (Sensors)</option>
+          </select>
+        </div>
+        <div class="span2">
+          <label class="lbl">Hãng &amp; Mã thiết bị (Model) *</label>
+          <textarea id="rep-form-model" class="inp mono" rows="1" required placeholder="VD: Yaskawa F7 15kW - CIMR-F7H4015"></textarea>
+        </div>
+        <div class="fgrid c2" style="gap:8px;">
+          <div><label class="lbl">Ngày</label><input id="rep-form-date" class="inp mono" type="text" placeholder="YYYY-MM-DD" /></div>
+          <div>
+            <label class="lbl">Trạng thái</label>
+            <select id="rep-form-status" class="sel">
+              <option value="review">Cần xem lại</option>
+              <option value="mastered">Đã làm chủ</option>
+              <option value="researching">Đang nghiên cứu</option>
+              <option value="unclassified">Chưa phân loại</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-warn">
+        <label class="lbl">Lưu ý cấp nguồn test &amp; cấu hình vận hành (24VDC / DC bus, chân jump, dòng boot, thông số)</label>
+        <textarea id="rep-form-note" class="inp" rows="3"></textarea>
+      </div>
+
+      <div class="fgrid c2">
+        <div><label class="lbl">Linh kiện (phân cách dấu phẩy)</label><input id="rep-form-tags" class="inp mono" type="text" placeholder="A3120, IGBT, 74HC14" /></div>
+        <div><label class="lbl">Mã lỗi (phân cách dấu phẩy)</label><input id="rep-form-faults" class="inp mono" type="text" placeholder="oPE04, rr, oL1" /></div>
+      </div>
+
+      <div>
+        <div class="sec-head" style="margin-top:4px;">
+          <span class="sec-title">QUY TRÌNH BẮT BỆNH &amp; XỬ LÝ</span>
+          <button type="button" class="btn btn-sm btn-primary" onclick="addRepairStepRow()">+ Thêm bước kiểm tra</button>
+        </div>
+        <div id="rep-form-steps-container" class="stack"></div>
+      </div>
+
+      <div class="form-foot">
+        <button type="button" class="btn" onclick="closeRepairModal()">Hủy</button>
+        <button type="submit" class="btn btn-primary">Lưu ca sửa chữa</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ================= MODAL: KIẾN THỨC & SOP ================= -->
+<div id="knowledge-modal" class="overlay center hidden">
+  <div class="modal narrow">
+    <div class="ov-head">
+      <div class="ov-title" id="knowledge-modal-title"><span>THÊM KIẾN THỨC / SOP MỚI</span></div>
+      <button class="ov-x" onclick="closeKnowledgeModal()">×</button>
+    </div>
+    <form id="knowledge-form" class="ov-body form" onsubmit="submitKnowledgeForm(event)">
+      <input type="hidden" id="knw-form-id" />
+      <div class="fgrid c4">
+        <div>
+          <label class="lbl">Nhóm nguồn *</label>
+          <select id="knw-form-group" class="sel" required>
+            <option value="Knowledge">Kiến thức đo &amp; sửa (Knowledge)</option>
+            <option value="Automation">Tự động hóa (Automation)</option>
+            <option value="Errors">Mã lỗi nhanh (Errors)</option>
+          </select>
+        </div>
+        <div>
+          <label class="lbl">Phân loại</label>
+          <input id="knw-form-category" class="inp" list="knw-category-suggestions" placeholder="VD: Kỹ thuật Đo" />
+          <datalist id="knw-category-suggestions">
+            <option value="⚙️ Kỹ thuật Đo"></option>
+            <option value="⚙️ Kỹ thuật Sửa"></option>
+            <option value="⚙️ Workflow kiểm tra nhanh"></option>
+            <option value="📚Nguyên lý hoạt động"></option>
+            <option value="Sensors & Signals"></option>
+            <option value="Contactor"></option>
+            <option value="Relay"></option>
+            <option value="Interlock Circuit"></option>
+            <option value="Mạch tự giữ"></option>
+            <option value="Mạch đảo chiều động cơ"></option>
+            <option value="💻 Tự động hóa"></option>
+          </datalist>
+        </div>
+        <div><label class="lbl">Ngày</label><input id="knw-form-date" class="inp mono" type="text" placeholder="YYYY-MM-DD" /></div>
+        <div>
+          <label class="lbl">Trạng thái</label>
+          <select id="knw-form-status" class="sel">
+            <option value="review">Cần xem lại</option>
+            <option value="mastered">Đã làm chủ</option>
+            <option value="researching">Đang nghiên cứu</option>
+            <option value="unclassified">Chưa phân loại</option>
+          </select>
+        </div>
+      </div>
+      <div><label class="lbl">Chủ đề / Thiết bị *</label><input id="knw-form-topic" class="inp mono" required /></div>
+      <div><label class="lbl">Từ khóa lõi</label><textarea id="knw-form-takeaway" class="inp" rows="2"></textarea></div>
+      <div><label class="lbl">Bản chất nguyên lý / Quy trình SOP (đánh số 1. 2. 3. để hiển thị checklist)</label><textarea id="knw-form-concept" class="inp" rows="4"></textarea></div>
+      <div class="fgrid c2">
+        <div><label class="lbl">Câu hỏi phản biện (Tại sao?)</label><textarea id="knw-form-why" class="inp" rows="3"></textarea></div>
+        <div><label class="lbl">Ứng dụng thực chiến / Giải pháp trả lời</label><textarea id="knw-form-action" class="inp" rows="3"></textarea></div>
+      </div>
+      <div class="fgrid c2">
+        <div><label class="lbl">Lưu ý an toàn</label><textarea id="knw-form-note" class="inp" rows="2"></textarea></div>
+        <div><label class="lbl">Linh kiện liên quan</label><input id="knw-form-tags" class="inp mono" type="text" placeholder="IGBT, OPTOCOUPLER" /></div>
+      </div>
+      <div>
+        <div class="sec-head" style="margin-top:2px;">
+          <span class="sec-title">MỤC GHI CHÚ MỞ RỘNG &amp; ẢNH KÉO THẢ (CTRL+V DÁN ẢNH)</span>
+          <button type="button" class="btn btn-sm btn-primary" onclick="addKnowledgeSectionRow()">+ Thêm mục / ảnh kéo thả</button>
+        </div>
+        <div id="knw-form-sections-container" class="stack"></div>
+      </div>
+      <div>
+        <div class="sec-head" style="margin-top:4px;">
+          <span class="sec-title">CÂU HỎI ÔN TẬP RIÊNG (HỎI XOÁY · ĐÁP GỌN)</span>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="btn btn-sm" onclick="suggestModalDrillQa('knowledge')">⚡ Tự gợi ý từ bài</button>
+            <button type="button" class="btn btn-sm btn-primary" onclick="addDrillQaRow('knw-form-drill-container')">+ Thêm câu hỏi</button>
+          </div>
+        </div>
+        <div id="knw-form-drill-container" class="stack"></div>
+      </div>
+      <div class="form-foot">
+        <button type="button" class="btn" onclick="closeKnowledgeModal()">Hủy</button>
+        <button type="submit" class="btn btn-primary">Lưu kiến thức</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ================= MODAL: LẬP TRÌNH & HỆ THỐNG PLC ================= -->
+<div id="plc-modal" class="overlay center hidden">
+  <div class="modal">
+    <div class="ov-head">
+      <div class="ov-title" id="plc-modal-title"><span>THÊM BÀI LẬP TRÌNH PLC MỚI</span></div>
+      <button class="ov-x" onclick="closePlcModal()">×</button>
+    </div>
+    <form id="plc-form" class="ov-body form" onsubmit="submitPlcForm(event)">
+      <input type="hidden" id="plc-form-id" />
+      <div class="fgrid c4">
+        <div>
+          <label class="lbl">Phân loại *</label>
+          <select id="plc-form-category" class="sel" required>
+            <option value="Khối hàm (FB/FC/OB)">Khối hàm (FB/FC/OB)</option>
+            <option value="Vùng nhớ (DB/UDT)">Vùng nhớ (db/udt)</option>
+            <option value="Analog & PID">Analog &amp; PID</option>
+            <option value="Đấu nối & Bản vẽ">Đấu nối &amp; Bản vẽ</option>
+          </select>
+        </div>
+        <div class="span2">
+          <label class="lbl">Nền tảng PLC (Brand / Platform)</label>
+          <input id="plc-form-platform" class="inp mono" type="text" placeholder="VD: Siemens TIA Portal (S7-1200/1500)" />
+        </div>
+        <div class="fgrid c2" style="gap:8px;">
+          <div><label class="lbl">Ngày</label><input id="plc-form-date" class="inp mono" type="text" placeholder="YYYY-MM-DD" /></div>
+          <div>
+            <label class="lbl">Trạng thái</label>
+            <select id="plc-form-status" class="sel">
+              <option value="review">Cần xem lại</option>
+              <option value="mastered">Đã làm chủ</option>
+              <option value="researching">Đang nghiên cứu</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="fgrid c2">
+        <div><label class="lbl">Tên chủ đề / Khối hàm *</label><input id="plc-form-title" class="inp mono" required placeholder="VD: Xử lý tín hiệu Analog 4-20mA với NORM_X & SCALE_X" /></div>
+        <div><label class="lbl">Thẻ từ khóa (phân cách dấu phẩy)</label><input id="plc-form-tags" class="inp mono" type="text" placeholder="TIA PORTAL, S7-1200, ANALOG, FB" /></div>
+      </div>
+
+      <div>
+        <div class="sec-head" style="margin-top:2px;">
+          <span class="sec-title">BẢNG CHÂN KHỐI HÀM / THAM SỐ (PINOUT - CÓ THỂ ĐỂ TRỐNG)</span>
+          <button type="button" class="btn btn-sm" onclick="addPlcPinRow()">+ Thêm chân / tham số</button>
+        </div>
+        <div id="plc-form-pinout-container" class="stack"></div>
+      </div>
+
+      <div>
+        <div class="sec-head" style="margin-top:2px;">
+          <span class="sec-title">CÁC MỤC NỘI DUNG CHI TIẾT (TỰ ĐẶT NHÃN · XÓA · THÊM MỚI · CTRL+V DÁN ẢNH KÉO THẢ)</span>
+          <button type="button" class="btn btn-sm btn-primary" onclick="addPlcSectionRow()">+ Thêm mục nội dung mới</button>
+        </div>
+        <div id="plc-form-sections-container" class="stack"></div>
+      </div>
+
+      <div>
+        <div class="sec-head" style="margin-top:4px;">
+          <span class="sec-title">CÂU HỎI ÔN TẬP RIÊNG (HỎI XOÁY · ĐÁP GỌN)</span>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="btn btn-sm" onclick="suggestModalDrillQa('plc')">⚡ Tự gợi ý từ bài</button>
+            <button type="button" class="btn btn-sm btn-primary" onclick="addDrillQaRow('plc-form-drill-container')">+ Thêm câu hỏi</button>
+          </div>
+        </div>
+        <div id="plc-form-drill-container" class="stack"></div>
+      </div>
+
+      <div class="form-foot">
+        <button type="button" class="btn" onclick="closePlcModal()">Hủy</button>
+        <button type="submit" class="btn btn-primary">Lưu bài PLC</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ================= MODAL: MẠNG TRUYỀN THÔNG ================= -->
+<div id="network-modal" class="overlay center hidden">
+  <div class="modal">
+    <div class="ov-head">
+      <div class="ov-title" id="network-modal-title"><span>THÊM CẤU HÌNH MẠNG MỚI</span></div>
+      <button class="ov-x" onclick="closeNetworkModal()">×</button>
+    </div>
+    <form id="network-form" class="ov-body form" onsubmit="submitNetworkForm(event)">
+      <input type="hidden" id="net-form-id" />
+      <div class="fgrid c4">
+        <div>
+          <label class="lbl">Giao thức *</label>
+          <select id="net-form-protocol" class="sel" required>
+            <option value="Modbus RTU/TCP">Modbus RTU/TCP</option>
+            <option value="EtherCAT">EtherCAT</option>
+            <option value="CANbus / CANopen">CANbus / CANopen</option>
+            <option value="Profibus / Profinet">Profibus / Profinet</option>
+            <option value="USS / RS485">USS / RS485</option>
+          </select>
+        </div>
+        <div class="span2">
+          <label class="lbl">Thiết bị kết nối (Target Device) *</label>
+          <input id="net-form-target" class="inp mono" required placeholder="VD: PLC S7-1200 <-> Biến tần Yaskawa V1000" />
+        </div>
+        <div class="fgrid c2" style="gap:8px;">
+          <div><label class="lbl">Ngày</label><input id="net-form-date" class="inp mono" type="text" placeholder="YYYY-MM-DD" /></div>
+          <div>
+            <label class="lbl">Trạng thái</label>
+            <select id="net-form-status" class="sel">
+              <option value="review">Cần xem lại</option>
+              <option value="mastered">Đã làm chủ</option>
+              <option value="researching">Đang nghiên cứu</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div><label class="lbl">Thẻ từ khóa (phân cách dấu phẩy)</label><input id="net-form-tags" class="inp mono" type="text" placeholder="MODBUS, RS485, 120 OHM, CANOPEN" /></div>
+
+      <div>
+        <div class="sec-head" style="margin-top:2px;">
+          <span class="sec-title">BẢN ĐỒ THANH GHI / KHUNG TRUYỀN (REGISTER MAP - CÓ THỂ ĐỂ TRỐNG)</span>
+          <button type="button" class="btn btn-sm" onclick="addNetRegRow()">+ Thêm thanh ghi</button>
+        </div>
+        <div id="net-form-regmap-container" class="stack"></div>
+      </div>
+
+      <div>
+        <div class="sec-head" style="margin-top:2px;">
+          <span class="sec-title">CÁC MỤC NỘI DUNG CHI TIẾT (TỰ ĐẶT NHÃN · XÓA · THÊM MỚI · CTRL+V DÁN ẢNH KÉO THẢ)</span>
+          <button type="button" class="btn btn-sm btn-primary" onclick="addNetworkSectionRow()">+ Thêm mục nội dung mới</button>
+        </div>
+        <div id="net-form-sections-container" class="stack"></div>
+      </div>
+
+      <div>
+        <div class="sec-head" style="margin-top:4px;">
+          <span class="sec-title">CÂU HỎI ÔN TẬP RIÊNG (HỎI XOÁY · ĐÁP GỌN)</span>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="btn btn-sm" onclick="suggestModalDrillQa('network')">⚡ Tự gợi ý từ bài</button>
+            <button type="button" class="btn btn-sm btn-primary" onclick="addDrillQaRow('net-form-drill-container')">+ Thêm câu hỏi</button>
+          </div>
+        </div>
+        <div id="net-form-drill-container" class="stack"></div>
+      </div>
+
+      <div class="form-foot">
+        <button type="button" class="btn" onclick="closeNetworkModal()">Hủy</button>
+        <button type="submit" class="btn btn-primary">Lưu cấu hình mạng</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ================= MODAL: QUẢN LÝ DANH MỤC (MRL / PLC / NET) ================= -->
+<div id="category-manager-modal" class="overlay center hidden">
+  <div class="modal narrow" style="max-width:680px;">
+    <div class="ov-head">
+      <div class="ov-title" id="cat-mgr-title"><small>TÙY CHỈNH THANH DANH MỤC</small><span id="cat-mgr-title-text">QUẢN LÝ DANH MỤC</span></div>
+      <button type="button" class="ov-x" onclick="closeCategoryManagerModal()">×</button>
+    </div>
+    <div class="ov-body form">
+      <div style="font-size:12.5px; color:var(--text-3); line-height:1.5;">
+        Đổi tên, sắp xếp thứ tự (<b>↑ / ↓</b>), thêm mới hoặc xóa các mục trên thanh lọc. Mẹo: Bạn cũng có thể <b>nhấp đúp (double-click)</b> trực tiếp vào bất kỳ mục nào trên thanh để sửa nhanh tại chỗ.
+      </div>
+      <div id="cat-mgr-list" class="stack"></div>
+      <div class="cat-mgr-add-bar">
+        <input id="cat-mgr-new-inp" class="inp mono" type="text" placeholder="Nhập tên mục mới (VD: HMI & SCADA, Motion Control...)..." onkeydown="if(event.key==='Enter'){event.preventDefault();addCatMgrRow();}" />
+        <button type="button" class="btn btn-primary" onclick="addCatMgrRow()">+ Thêm mục</button>
+      </div>
+      <div id="cat-mgr-reassign-box" class="warn hidden">
+        <div class="warn-title"><span>CHUYỂN BÀI HỌC CỦA MỤC ĐÃ XÓA</span></div>
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:4px;">
+          <span id="cat-mgr-reassign-msg" style="font-size:12.5px;">Các bài thuộc mục bị xóa sẽ được chuyển sang:</span>
+          <select id="cat-mgr-fallback-sel" class="sel mono" style="min-width:200px;"></select>
+        </div>
+      </div>
+      <div class="form-foot" style="justify-content:space-between;">
+        <button type="button" class="btn" onclick="resetCatMgrToDefault()">↺ Khôi phục mặc định</button>
+        <div style="display:flex; gap:8px;">
+          <button type="button" class="btn" onclick="closeCategoryManagerModal()">Hủy</button>
+          <button type="button" id="cat-mgr-save-btn" class="btn btn-primary" onclick="submitCategoryManagerModal()">Lưu thay đổi</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= LIGHTBOX / TOAST ================= -->
+<div id="lightbox-modal" class="lightbox hidden" onclick="closeLightbox()">
+  <img id="lightbox-img" src="" alt="Xem ảnh" onclick="event.stopPropagation()" />
+  <div id="lightbox-caption" class="lightbox-cap"></div>
+</div>
+<!-- ================= MODAL: SỔ TỪ VỰNG TIẾNG ANH CHUYÊN NGÀNH ================= -->
+<div id="en-vocab-modal" class="overlay center hidden">
+  <div class="modal narrow" style="max-width:860px;">
+    <div class="ov-head">
+      <div class="ov-title" id="en-vocab-modal-title"><small>HỌC TIẾNG ANH CHUYÊN NGÀNH KỸ THUẬT</small><span>SỔ TỪ VỰNG &amp; THUẬT NGỮ VI ⇄ EN (<span class="en-vocab-count">0</span>)</span></div>
+      <button type="button" class="ov-x" onclick="closeVocabModal()">×</button>
+    </div>
+    <div class="ov-body form">
+      <form id="en-vocab-add-form" class="vocab-add-box" onsubmit="submitQuickVocabAdd(event)">
+        <div class="vocab-add-grid">
+          <input id="vocab-add-vi" class="inp" type="text" placeholder="Thuật ngữ / Câu Tiếng Việt (VD: vòng quét chương trình)" />
+          <input id="vocab-add-en" class="inp mono" type="text" placeholder="Thuật ngữ Tiếng Anh (VD: Program scan cycle)" />
+          <select id="vocab-add-cat" class="sel">
+            <option value="PLC">PLC</option>
+            <option value="NET">NET</option>
+            <option value="REPAIR">SỬA CHỮA / VFD</option>
+            <option value="TECH">KỸ THUẬT CHUNG</option>
+          </select>
+          <button type="submit" class="btn btn-primary">+ Thêm từ</button>
+        </div>
+        <div class="vocab-add-ex-grid">
+          <input id="vocab-add-ex-vi" class="inp" type="text" placeholder="Câu ví dụ Tiếng Việt (tùy chọn)..." />
+          <input id="vocab-add-ex-en" class="inp" type="text" placeholder="Câu ví dụ Tiếng Anh (tùy chọn)..." />
+        </div>
+      </form>
+
+      <div class="vocab-toolbar">
+        <input id="en-vocab-search" class="inp" type="text" placeholder="Tìm nhanh từ vựng Việt / Anh..." oninput="renderVocabModalList()" />
+        <select id="en-vocab-cat-filter" class="sel" onchange="renderVocabModalList()">
+          <option value="ALL">Tất cả nhóm</option>
+          <option value="PLC">PLC</option>
+          <option value="NET">NET</option>
+          <option value="REPAIR">REPAIR</option>
+          <option value="TECH">TECH</option>
+        </select>
+        <button type="button" class="btn btn-primary" onclick="startEnVocabFlashcards('en_vocab')">🧠 Ôn Flashcard Từ vựng</button>
+        <button type="button" class="btn" onclick="startEnVocabFlashcards('en_quiz')">⚡ Quiz 4 đáp án</button>
+      </div>
+
+      <div id="en-vocab-list" class="vocab-list stack"></div>
+
+      <div class="form-foot">
+        <button type="button" class="btn" onclick="closeVocabModal()">Đóng</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MODAL: THÊM / SỬA TỪ VỰNG & LEXICAL CHUNK ================= -->
+<div id="en-vocab-edit-modal" class="overlay center hidden">
+  <div class="modal narrow" style="max-width:720px;">
+    <div class="ov-head">
+      <div class="ov-title" id="en-vocab-edit-modal-title"><small>04 // ENGLISH · TECHNICAL VOCABULARY &amp; LEXICAL CHUNKS</small><span>THÊM TỪ VỰNG / CỤM TỪ MỚI</span></div>
+      <button type="button" class="ov-x" onclick="closeEnVocabEditorModal()">×</button>
+    </div>
+    <form id="en-vocab-edit-form" class="ov-body form" onsubmit="submitEnVocabEditorForm(event)">
+      <input type="hidden" id="ev-form-id" />
+      <div class="fgrid c2">
+        <div>
+          <label class="lbl">Thuật ngữ / Cụm Lexical Chunk Tiếng Anh *</label>
+          <div style="display:flex;gap:6px;">
+            <input id="ev-form-term" class="inp mono" type="text" required placeholder="VD: Inrush current hoặc Regarding the wiring diagram..." />
+            <button type="button" class="btn btn-sm btn-indigo" onclick="magicFillVocabModal()" title="Tự động điền IPA, loại từ, collocations và câu ví dụ">✨ Magic Fill</button>
+          </div>
+        </div>
+        <div>
+          <label class="lbl">Phiên âm IPA (tùy chọn)</label>
+          <input id="ev-form-ipa" class="inp mono" type="text" placeholder="VD: /ˈɪnrʌʃ ˈkʌrənt/" />
+        </div>
+      </div>
+      <div class="fgrid c3">
+        <div>
+          <label class="lbl">Loại từ (Word Class)</label>
+          <select id="ev-form-word-class" class="sel">
+            <option value="Noun">Noun</option>
+            <option value="Verb">Verb</option>
+            <option value="Adj">Adj</option>
+            <option value="Lexical Chunk">Lexical Chunk</option>
+            <option value="Collocation">Collocation</option>
+          </select>
+        </div>
+        <div>
+          <label class="lbl">Phân loại *</label>
+          <select id="ev-form-category" class="sel" required>
+            <option value="Giao tiếp & Hội thoại">Giao tiếp &amp; Hội thoại</option>
+            <option value="Lexical Chunks (Cụm từ nối)">Lexical Chunks (Cụm từ nối)</option>
+            <option value="Biến tần & Phần cứng">Biến tần &amp; Phần cứng</option>
+            <option value="PLC & Tự động hóa">PLC &amp; Tự động hóa</option>
+            <option value="Mạng truyền thông">Mạng truyền thông</option>
+            <option value="Giao tiếp Phỏng vấn">Giao tiếp Phỏng vấn</option>
+          </select>
+        </div>
+        <div>
+          <label class="lbl">Mức SRS</label>
+          <select id="ev-form-status" class="sel">
+            <option value="new">Từ mới (New)</option>
+            <option value="learning">Đang học (Learning)</option>
+            <option value="review">Ôn tập (Review)</option>
+            <option value="mastered">Đã làm chủ (Mastered)</option>
+          </select>
+        </div>
+      </div>
+      <div class="fgrid c2">
+        <div>
+          <label class="lbl">Cụm từ hay đi kèm (Collocations)</label>
+          <input id="ev-form-collocations" class="inp mono" type="text" placeholder="VD: limit inrush current, high inrush current" />
+        </div>
+        <div>
+          <label class="lbl">Liên kết ca bệnh (MRL/PLC/NET)</label>
+          <input id="ev-form-source" class="inp mono" type="text" placeholder="VD: REP-001, PLC-004, NET-001" />
+        </div>
+      </div>
+      <div>
+        <label class="lbl">Nghĩa Tiếng Việt &amp; Cách dùng trong kỹ thuật *</label>
+        <input id="ev-form-meaning" class="inp" type="text" required placeholder="VD: Điện trở mồi nạp tụ DC Bus" />
+      </div>
+      <div>
+        <label class="lbl">Câu ví dụ Tiếng Anh thực tế (Context EN)</label>
+        <textarea id="ev-form-ex-en" class="inp" rows="2" placeholder="VD: Check the pre-charge resistor if the VFD trips on DC bus undervoltage."></textarea>
+      </div>
+      <div>
+        <label class="lbl">Dịch câu ví dụ sang Tiếng Việt (Context VI)</label>
+        <textarea id="ev-form-ex-vi" class="inp" rows="2" placeholder="VD: Kiểm tra điện trở mồi nếu biến tần báo lỗi thấp áp DC Bus."></textarea>
+      </div>
+      <div class="form-foot">
+        <button type="button" class="btn" onclick="closeEnVocabEditorModal()">Hủy</button>
+        <button type="submit" class="btn btn-indigo">Lưu vào Kho từ vựng</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ================= MODAL: CẤU HÌNH GEMINI API KEY ================= -->
+<div id="en-ai-config-modal" class="overlay center hidden">
+  <div class="modal narrow" style="max-width:600px;">
+    <div class="ov-head">
+      <div class="ov-title" id="en-ai-config-title"><small>OPENQUIZ AI · ENGINE CONFIGURATION</small><span>🔑 CẤU HÌNH GEMINI API KEY (GOOGLE AI STUDIO)</span></div>
+      <button type="button" class="ov-x" onclick="closeAiConfigModal()">×</button>
+    </div>
+    <form id="en-ai-config-form" class="ov-body form" onsubmit="submitAiConfigForm(event)">
+      <div class="note-block accent" style="border-left-color:#6366F1;">
+        <div class="nb-title" style="color:#818CF8;">CHẾ ĐỘ LAI THÔNG MINH (HYBRID OFFLINE + GEMINI AI)</div>
+        <div class="nb-body" style="font-size:12.5px;">
+          • <b>Không cần API Key / Không có mạng:</b> Phần mềm vẫn chạy đầy đủ bằng <b>Offline Rule-based Generator &amp; Grammar Coach</b> từ 83 bản ghi MRL/PLC/NET và Kho Từ vựng.<br />
+          • <b>Khi dán Gemini API Key miễn phí:</b> Lấy key tại <code>aistudio.google.com/apikey</code> (lưu local trong SQLite trên máy bạn) để OpenQuiz AI sinh đề đọc hiểu Manual &amp; chấm ngữ pháp 1-1 chuyên sâu bằng AI thật.
+        </div>
+      </div>
+      <div id="ai-cfg-status-banner" class="mono" style="font-size:12px; padding:6px 10px; border:1px solid var(--line); background:var(--panel); border-radius:var(--r);"></div>
+      <div>
+        <label class="lbl">Gemini API Key (để trống nếu muốn xóa Key cũ hoặc dùng chế độ Offline)</label>
+        <input id="ai-cfg-key-input" class="inp mono" type="password" autocomplete="off" placeholder="AIzaSy..." />
+      </div>
+      <div>
+        <label class="lbl">Model Gemini</label>
+        <select id="ai-cfg-model-select" class="sel">
+          <option value="gemini-2.0-flash">gemini-2.0-flash (Nhanh &amp; Miễn phí — Khuyên dùng)</option>
+          <option value="gemini-2.5-flash">gemini-2.5-flash (Thông minh &amp; Chuẩn xác cao)</option>
+          <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+        </select>
+      </div>
+      <div class="form-foot" style="justify-content:space-between;">
+        <button type="button" class="btn btn-danger" onclick="clearGeminiApiKey()">Xóa Key (Dùng Offline)</button>
+        <div style="display:flex; gap:8px;">
+          <button type="button" class="btn" onclick="closeAiConfigModal()">Đóng</button>
+          <button type="submit" class="btn btn-indigo">Lưu cấu hình AI</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ================= ENGLISH SELECTION POPOVER & HOVER TOOLTIP ================= -->
+<div id="en-selection-popover" class="en-popover hidden" role="dialog" aria-label="Dịch thuật ngữ và câu sang Tiếng Anh"></div>
+<div id="en-hover-tip" class="en-hover-tip hidden" role="tooltip"></div>
+
+<div id="ctx-menu" class="ctx-menu hidden" role="menu" aria-label="Menu thao tác nhanh"></div>
+<div id="toast-container"></div>
+
+<!-- ================= MOBILE PWA CHROME (CHỈ HIỆN TRÊN < 768px) ================= -->
+<div id="mobile-detail-topbar">
+  <button type="button" id="mob-back-btn" class="mob-back-btn" onclick="closeMobileDetailOverlay(false)">← Quay lại danh sách</button>
+  <span id="mob-detail-id" class="mob-detail-id">---</span>
+  <select id="mob-detail-status" class="sel mob-detail-status hidden" onchange="onMobileDetailStatusChange(this.value)">
+    <option value="mastered">🟢 Đã làm chủ</option>
+    <option value="review">🟡 Cần xem lại</option>
+    <option value="researching">🔴 Đang nghiên cứu</option>
+    <option value="unclassified">⚪ Chưa phân loại</option>
+  </select>
+</div>
+
+<button type="button" id="mobile-fab" class="hidden" onclick="mobileFabAction()" title="Thêm nhanh bản ghi mới">+</button>
+
+<nav id="mobile-bottom-nav" aria-label="Điều hướng di động">
+  <button type="button" class="mob-nav-btn active" data-mob-tab="home" onclick="mobileNavGo('home')">
+    <span class="mob-nav-ico">🏠</span>
+    <span class="mob-nav-lbl">Trang chủ</span>
+  </button>
+  <button type="button" class="mob-nav-btn" data-mob-tab="repair" onclick="mobileNavGo('repair')">
+    <span class="mob-nav-ico">🔧</span>
+    <span class="mob-nav-lbl">Sửa mạch</span>
+  </button>
+  <button type="button" class="mob-nav-btn" data-mob-tab="plc_net" onclick="mobileNavGo('plc_net')">
+    <span class="mob-nav-ico">⚡</span>
+    <span class="mob-nav-lbl">PLC &amp; Mạng</span>
+  </button>
+  <button type="button" class="mob-nav-btn" data-mob-tab="english" onclick="mobileNavGo('english')">
+    <span class="mob-nav-ico">🇬🇧</span>
+    <span class="mob-nav-lbl">Tiếng Anh</span>
+  </button>
+  <button type="button" class="mob-nav-btn" data-mob-tab="sync" onclick="mobileNavGo('sync')">
+    <span class="mob-nav-ico">☁️</span>
+    <span class="mob-nav-lbl">Đồng bộ</span>
+  </button>
+</nav>
+
+<!-- ================= MODAL: MOBILE QR & CLOUD SYNC (DESKTOP TOPBAR) ================= -->
+<div id="mobile-sync-modal" class="overlay center hidden">
+  <div class="modal narrow" style="max-width:740px;">
+    <div class="ov-head">
+      <div class="ov-title"><small>MRL MOBILE PWA · TWO-WAY CLOUD SYNC</small><span>📱 MOBILE &amp; CLOUD SYNC (QR LAN · GITHUB GIST · OTA)</span></div>
+      <button type="button" class="ov-x" onclick="closeMobileSyncModal()">×</button>
+    </div>
+    <div id="mobile-sync-modal-body" class="ov-body"></div>
+  </div>
+</div>
+
+<script src="./static/js/core_store.js?v=1"></script>
+<script src="./static/js/01-core.js?v=11"></script>
+<script src="./static/js/02-boot.js?v=15"></script>
+<script src="./static/js/03-views.js?v=7"></script>
+<script src="./static/js/04-media.js?v=9"></script>
+<script src="./static/js/05-split.js?v=9"></script>
+<script src="./static/js/06-reference.js?v=8"></script>
+<script src="./static/js/07-flashcards.js?v=9"></script>
+<script src="./static/js/08-data.js?v=8"></script>
+<script src="./static/js/09-english.js?v=15"></script>
+<script src="./static/js/10-english-hub.js?v=9"></script>
+<script src="./static/a11y.js?v=8"></script>
+<script src="./static/ui.js?v=10"></script>
+<script src="./static/js/mobile_shell.js?v=3"></script>
+</body>
+</html>
