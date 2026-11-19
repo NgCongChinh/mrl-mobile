@@ -1,5 +1,5 @@
-/* MRL PWA Service Worker — Network-First OTA Auto-Update (20261119042039) */
-const CACHE_NAME = 'mrl-pwa-20261119042039';
+/* MRL PWA Service Worker — Network-First OTA Auto-Update (20261119044659) */
+const CACHE_NAME = 'mrl-pwa-20261119044659';
 const CORE_SHELL = [
   './',
   './index.html',
@@ -46,7 +46,7 @@ self.addEventListener('activate', (event) => {
 function _isNetworkFirstAsset(url) {
   const p = url.pathname.toLowerCase();
   return (
-    p === '/' ||
+    p.endsWith('/') ||
     p.endsWith('.html') ||
     p.endsWith('.css') ||
     p.endsWith('.js') ||

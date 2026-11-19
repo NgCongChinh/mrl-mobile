@@ -46,10 +46,14 @@
       : { home: 'Trang chủ', repair: 'Sửa mạch', plc_net: 'PLC & Mạng', english: 'Tiếng Anh', sync: 'Đồng bộ' };
 
     const grp = _activeBottomGroup();
+    const isDirtySync = (window.MRLCoreStore && typeof window.MRLCoreStore.hasUnsyncedChanges === 'function')
+      ? window.MRLCoreStore.hasUnsyncedChanges()
+      : (localStorage.getItem('mrl_has_unsynced') === '1');
     if (navEl) {
       navEl.querySelectorAll('.mob-nav-btn').forEach((btn) => {
         const key = btn.getAttribute('data-mob-tab');
         btn.classList.toggle('active', key === grp);
+        if (key === 'sync') btn.classList.toggle('has-unsynced', Boolean(isDirtySync));
         const lblEl = btn.querySelector('.mob-nav-lbl');
         if (lblEl && navLabels[key]) lblEl.textContent = navLabels[key];
       });
@@ -127,8 +131,12 @@
 
     if (target === 'home') {
       openPortalScreen();
+      _enhanceMobilePortal();
       _syncMobileChrome();
       return;
+    }
+    if (isMobileViewport() && (!history.state || (!history.state.mrlMobWs && !history.state.mrlMobDetail && !history.state.mrlMobOverlay))) {
+      try { history.pushState({ mrlMobWs: true }, ''); } catch (_) {}
     }
     if (target === 'repair') {
       enterWorkspace('mrl', 'repairs');
@@ -159,8 +167,14 @@
     const stEl = document.getElementById('mob-detail-status');
     const backEl = document.getElementById('mob-back-btn');
     const langBtn = document.getElementById('mob-detail-lang-btn');
+    const wakeBtn = document.getElementById('mob-wakelock-btn');
     const isEn = state.appLang === 'en';
-    if (backEl) backEl.textContent = isEn ? '← Back to list' : '← Quay lại danh sách';
+    if (backEl) backEl.textContent = isEn ? '← Back' : '← Quay lại';
+    if (wakeBtn) {
+      const hasWakeLock = typeof navigator !== 'undefined' && 'wakeLock' in navigator;
+      wakeBtn.classList.toggle('hidden', !hasWakeLock);
+      wakeBtn.title = isEn ? 'Keep screen awake while probing circuits' : 'Giữ sáng màn hình khi đo mạch';
+    }
     if (langBtn) {
       langBtn.textContent = isEn ? 'EN' : 'VI';
       langBtn.classList.toggle('lang-en', isEn);
@@ -190,8 +204,6 @@
   window.toggleMobileQuickLang = async function () {
     const next = state.appLang === 'en' ? 'vi' : 'en';
     if (typeof setAppLanguage === 'function') await setAppLanguage(next);
-    _syncMobileChrome();
-    if (_mobileSyncOpen) renderMobileSyncPanel();
   };
 
   window.openMobileDetailOverlay = function (kind, id, pushHist = true) {
@@ -205,13 +217,55 @@
     _syncMobileChrome();
   };
 
+  let _wakeLockSentinel = null;
+  let _suppressPopCount = 0;
+
+  async function _releaseMobileWakeLock() {
+    if (_wakeLockSentinel) {
+      try { await _wakeLockSentinel.release(); } catch (_) {}
+      _wakeLockSentinel = null;
+    }
+    document.getElementById('mob-wakelock-btn')?.classList.remove('active');
+  }
+
+  window.toggleMobileWakeLock = async function () {
+    const btn = document.getElementById('mob-wakelock-btn');
+    const isEn = state.appLang === 'en';
+    if (!('wakeLock' in navigator)) return;
+    if (_wakeLockSentinel) {
+      await _releaseMobileWakeLock();
+      showToast(isEn ? 'Screen Wake Lock OFF' : 'Đã tắt giữ sáng màn hình', 'info');
+      return;
+    }
+    try {
+      _wakeLockSentinel = await navigator.wakeLock.request('screen');
+      btn?.classList.add('active');
+      _wakeLockSentinel.addEventListener?.('release', () => {
+        _wakeLockSentinel = null;
+        document.getElementById('mob-wakelock-btn')?.classList.remove('active');
+      });
+      showToast(isEn ? '☀️ Screen Wake Lock ON' : '☀️ Đã bật giữ sáng màn hình khi đo mạch', 'success');
+    } catch (_) {
+      btn?.classList.remove('active');
+      showToast(isEn ? 'Screen Wake Lock blocked by system' : 'Trình duyệt không cho phép giữ sáng màn hình', 'info');
+    }
+  };
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && _wakeLockSentinel) {
+      _releaseMobileWakeLock();
+    }
+  });
+
   window.closeMobileDetailOverlay = function (fromPop = false) {
     if (!_mobileDetail && !document.body.classList.contains('mobile-detail-open')) return;
     _mobileDetail = null;
     document.body.classList.remove('mobile-detail-open');
+    _releaseMobileWakeLock();
     _syncMobileChrome();
     if (!fromPop && history.state && history.state.mrlMobDetail) {
-      try { history.back(); } catch (_) {}
+      _suppressPopCount += 1;
+      try { history.back(); } catch (_) { _suppressPopCount = Math.max(0, _suppressPopCount - 1); }
     }
   };
 
@@ -223,9 +277,59 @@
     }
   };
 
+  function _closeTopOverlayFromBack() {
+    const lb = document.getElementById('lightbox-modal');
+    if (lb && !lb.classList.contains('hidden')) {
+      if (typeof closeLightbox === 'function') closeLightbox();
+      else lb.classList.add('hidden');
+      return true;
+    }
+    const openOverlays = Array.from(document.querySelectorAll('.overlay:not(.hidden)'));
+    if (!openOverlays.length) return false;
+    const topEl = openOverlays[openOverlays.length - 1];
+    const id = topEl.id;
+    if (id === 'crossref-overlay' && typeof closeCrossRefDrawer === 'function') closeCrossRefDrawer();
+    else if (id === 'en-vocab-modal' && typeof closeVocabModal === 'function') closeVocabModal();
+    else if (id === 'en-ai-config-modal' && typeof closeAiConfigModal === 'function') closeAiConfigModal();
+    else if (id === 'mobile-sync-modal') closeMobileSyncModal();
+    else topEl.classList.add('hidden');
+    return true;
+  }
+
+  function _setupOverlayBackObserver() {
+    if (typeof MutationObserver === 'undefined') return;
+    const obs = new MutationObserver((muts) => {
+      if (!isMobileViewport()) return;
+      for (const m of muts) {
+        if (m.type !== 'attributes' || m.attributeName !== 'class') continue;
+        const el = m.target;
+        if (!el || (el.id !== 'lightbox-modal' && !el.classList?.contains('overlay'))) continue;
+        const isOpen = !el.classList.contains('hidden');
+        if (isOpen && (!history.state || !history.state.mrlMobOverlay)) {
+          try { history.pushState({ mrlMobOverlay: true }, ''); } catch (_) {}
+        }
+      }
+    });
+    const lb = document.getElementById('lightbox-modal');
+    if (lb) obs.observe(lb, { attributes: true, attributeFilter: ['class'] });
+    document.querySelectorAll('.overlay').forEach((ov) => {
+      obs.observe(ov, { attributes: true, attributeFilter: ['class'] });
+    });
+  }
+
   window.addEventListener('popstate', () => {
+    if (_suppressPopCount > 0) {
+      _suppressPopCount -= 1;
+      return;
+    }
+    if (!isMobileViewport()) return;
+    if (_closeTopOverlayFromBack()) return;
     if (document.body.classList.contains('mobile-detail-open')) {
       closeMobileDetailOverlay(true);
+      return;
+    }
+    if (_mobileSyncOpen || state.activeWorkspace) {
+      mobileNavGo('home');
     }
   });
 
@@ -301,7 +405,30 @@
       window.toggleEnMode = wrappedToggle;
     }
 
-    // Wrap openPortalScreen / enterWorkspace / switchTab so bottom nav & subbar always stay in sync
+    // Wrap openPortalScreen / enterWorkspace / switchTab / renderPortalScreen / AI config handlers
+    if (typeof window.renderPortalScreen === 'function' && !window.renderPortalScreen._mobPortalWrapped) {
+      const origPortal = window.renderPortalScreen;
+      const wrappedPortal = function () {
+        const out = origPortal.apply(this, arguments);
+        _enhanceMobilePortal();
+        return out;
+      };
+      wrappedPortal._mobPortalWrapped = true;
+      window.renderPortalScreen = wrappedPortal;
+    }
+
+    ['closeAiConfigModal', 'submitAiConfigForm', 'clearGeminiApiKey'].forEach((fnName) => {
+      const orig = window[fnName];
+      if (typeof orig !== 'function' || orig._mobAiWrapped) return;
+      const wrapped = async function () {
+        const out = await orig.apply(this, arguments);
+        if (_mobileSyncOpen) renderMobileSyncPanel();
+        return out;
+      };
+      wrapped._mobAiWrapped = true;
+      window[fnName] = wrapped;
+    });
+
     ['openPortalScreen', 'enterWorkspace', 'switchTab'].forEach((fnName) => {
       const orig = window[fnName];
       if (typeof orig !== 'function' || orig._mobNavWrapped) return;
@@ -310,6 +437,7 @@
           _lastPlcNetWs = arguments[0];
         }
         const out = orig.apply(this, arguments);
+        if (fnName === 'openPortalScreen') _enhanceMobilePortal();
         _syncMobileChrome();
         return out;
       };
@@ -415,7 +543,7 @@
           <button type="button" class="btn" onclick="toggleMobileSyncLang()">🌐 ${state.appLang === 'en' ? 'Ngôn ngữ: EN → VI' : 'Ngôn ngữ: VI → EN'}</button>
           <button type="button" class="btn ${state.enMode ? 'split-on' : ''}" onclick="toggleEnMode()">🇬🇧 ${isEn ? (state.enMode ? 'EN Study: ON' : 'EN Study: OFF') : (state.enMode ? 'Song ngữ: BẬT' : 'Song ngữ: TẮT')}</button>
           <button type="button" class="btn" onclick="if(typeof openVocabModal==='function')openVocabModal()">⭐ ${isEn ? 'Vocab' : 'Sổ từ vựng'} (${(state.englishCards || []).length || (state.enVocabulary || []).length})</button>
-          <button type="button" class="btn" onclick="document.querySelector('.theme-btn')?.click(); renderMobileSyncPanel();">◑ ${document.documentElement.dataset.theme === 'light' ? 'Dark Mode' : 'Light Mode'}</button>
+          <button type="button" class="btn" onclick="document.querySelector('.theme-btn')?.click(); renderMobileSyncPanel();">◑ ${document.documentElement.dataset.theme === 'light' ? (isEn ? 'Dark Mode' : 'Chế độ tối') : (isEn ? 'Light Mode' : 'Chế độ sáng')}</button>
           <button type="button" class="btn btn-indigo" onclick="MRLCoreStore.checkOtaUpdate()">🚀 OTA Update</button>
         </div>
       </div>
@@ -435,7 +563,6 @@
   window.toggleMobileSyncLang = async function () {
     const next = state.appLang === 'en' ? 'vi' : 'en';
     if (typeof setAppLanguage === 'function') await setAppLanguage(next);
-    renderMobileSyncPanel();
   };
 
   window.onMobileBackupFilePick = async function (ev) {
@@ -719,15 +846,170 @@
     }
   };
 
+  // -------------------------------------------------------------------------
+  // Mobile Portal Enhancements: Collapsible Sub-modules & Global Search
+  // -------------------------------------------------------------------------
+  function _runMobileGlobalSearch(rawQuery) {
+    const box = document.getElementById('mobile-global-results');
+    if (!box) return;
+    const q = String(rawQuery || '').trim().toLowerCase();
+    const clr = document.getElementById('mob-gsearch-clear');
+    if (clr) clr.classList.toggle('hidden', !q);
+    if (!q) {
+      box.classList.add('hidden');
+      box.innerHTML = '';
+      return;
+    }
+
+    const hits = [];
+    const pushHit = (ws, tab, kind, id, badge, title, sub, isEnWs = false) => {
+      if (hits.length >= 12) return;
+      hits.push({ ws, tab, kind, id, badge, title, sub, isEnWs });
+    };
+
+    (state.repairCases || []).forEach((r) => {
+      if (hits.length >= 12) return;
+      const hay = [r.id, r.brand_model, r.device_category, r.fault_symptom_raw, r.root_cause_raw, r.solution_raw, r.note, ...(r.fault_codes || []), ...(r.component_tags || [])].join(' ').toLowerCase();
+      if (hay.includes(q)) {
+        pushHit('mrl', 'repairs', 'repair', r.id, 'REPAIR', r.brand_model || r.id, r.fault_symptom_raw || r.device_category || '');
+      }
+    });
+    (state.knowledgeItems || []).forEach((k) => {
+      if (hits.length >= 12) return;
+      const hay = [k.id, k.topic_model, k.category, k.key_takeaway, k.core_concept_workflow, k.actionable_application, ...(k.component_tags || [])].join(' ').toLowerCase();
+      if (hay.includes(q)) {
+        pushHit('mrl', 'knowledge', 'knowledge', k.id, 'SOP', k.topic_model || k.id, k.key_takeaway || k.category || '');
+      }
+    });
+    (state.plcNotes || []).forEach((p) => {
+      if (hits.length >= 12) return;
+      const hay = [p.id, p.title, p.plc_brand_platform, p.category, p.core_summary, p.code_snippet, ...(p.tags || [])].join(' ').toLowerCase();
+      if (hay.includes(q)) {
+        pushHit('plc', 'plc', 'plc', p.id, 'PLC', p.title || p.id, p.core_summary || p.category || '');
+      }
+    });
+    (state.networkNotes || []).forEach((n) => {
+      if (hits.length >= 12) return;
+      const hay = [n.id, n.protocol, n.target_device, n.physical_wiring, n.comm_settings, n.troubleshooting_tips, ...(n.tags || [])].join(' ').toLowerCase();
+      if (hay.includes(q)) {
+        pushHit('network', 'network', 'network', n.id, 'NETWORK', n.target_device || n.protocol || n.id, n.protocol || n.physical_wiring || '');
+      }
+    });
+    (state.englishCards || []).forEach((c) => {
+      if (hits.length >= 12) return;
+      const hay = [c.id, c.term, c.meaning_vi, c.category, c.example_en, c.example_vi, c.linked_record_id].join(' ').toLowerCase();
+      if (hay.includes(q)) {
+        pushHit('english', 'en-vocab-bank', 'english_card', c.id, 'ENGLISH', c.term || c.id, c.meaning_vi || '', true);
+      }
+    });
+
+    if (!hits.length) {
+      box.innerHTML = `<div style="padding:12px;font-size:13px;color:var(--text-3);">${state.appLang === 'en' ? 'No matching records across 4 modules.' : 'Không tìm thấy kết quả khớp trong 4 phân hệ.'}</div>`;
+      box.classList.remove('hidden');
+      return;
+    }
+
+    box.innerHTML = hits.map((h) => `
+      <button type="button" class="mob-gsearch-row" onclick="openMobileGlobalResult('${escapeHtml(h.ws)}','${escapeHtml(h.tab)}','${escapeHtml(h.kind)}','${escapeHtml(h.id)}')">
+        <div class="mob-gsearch-row-top">
+          <span class="mob-gsearch-ws ${h.isEnWs ? 'en' : ''}">${escapeHtml(h.badge)}</span>
+          <span class="row-id">${escapeHtml(h.id)}</span>
+        </div>
+        <div class="mob-gsearch-title">${escapeHtml(h.title)}</div>
+        ${h.sub ? `<div class="mob-gsearch-sub">${escapeHtml(h.sub)}</div>` : ''}
+      </button>`).join('');
+    box.classList.remove('hidden');
+  }
+
+  window.openMobileGlobalResult = function (ws, tab, kind, id) {
+    const inp = document.getElementById('mobile-global-search');
+    if (inp) inp.value = '';
+    _runMobileGlobalSearch('');
+    enterWorkspace(ws, tab);
+    if (kind === 'repair' && typeof selectRepairCase === 'function') selectRepairCase(id);
+    else if (kind === 'knowledge' && typeof selectKnowledgeItem === 'function') selectKnowledgeItem(id);
+    else if (kind === 'plc' && typeof selectPlcNote === 'function') selectPlcNote(id);
+    else if (kind === 'network' && typeof selectNetworkNote === 'function') selectNetworkNote(id);
+    else if (kind === 'english_card' && typeof selectEnBankItem === 'function') selectEnBankItem(id);
+  };
+
+  function _enhanceMobilePortal() {
+    const container = document.querySelector('#portal-screen .portal-container');
+    const grid = document.getElementById('portal-grid');
+    if (!container || !grid) return;
+    const isEn = state.appLang === 'en';
+
+    // 1. Global Search Bar above #portal-grid
+    let searchWrap = document.getElementById('mobile-global-search-wrap');
+    if (!searchWrap) {
+      searchWrap = document.createElement('div');
+      searchWrap.id = 'mobile-global-search-wrap';
+      searchWrap.innerHTML = `
+        <div class="mob-gsearch-box">
+          <input id="mobile-global-search" type="search" autocomplete="off" />
+          <button type="button" id="mob-gsearch-clear" class="mob-gsearch-clear hidden" aria-label="Clear">×</button>
+        </div>
+        <div id="mobile-global-results" class="hidden"></div>`;
+      container.insertBefore(searchWrap, grid);
+      const inp = document.getElementById('mobile-global-search');
+      const clr = document.getElementById('mob-gsearch-clear');
+      inp?.addEventListener('input', (ev) => _runMobileGlobalSearch(ev.target.value));
+      clr?.addEventListener('click', () => {
+        if (inp) inp.value = '';
+        _runMobileGlobalSearch('');
+        inp?.focus();
+      });
+    }
+    const gInp = document.getElementById('mobile-global-search');
+    if (gInp) {
+      gInp.placeholder = isEn
+        ? '🔍 Quick search all 4 modules (A3120, oL1, OB86, Modbus...)'
+        : '🔍 Tìm nhanh 4 phân hệ (A3120, oL1, OB86, Modbus...)';
+    }
+
+    // 2. Collapsible .portal-links toggles inside each .portal-card
+    grid.querySelectorAll('.portal-card').forEach((card) => {
+      const linksEl = card.querySelector('.portal-links');
+      if (!linksEl) return;
+      const cnt = linksEl.querySelectorAll('.portal-link-btn').length;
+      let toggleBtn = card.querySelector('.mob-portal-links-toggle');
+      if (!toggleBtn) {
+        toggleBtn = document.createElement('button');
+        toggleBtn.type = 'button';
+        toggleBtn.className = 'mob-portal-links-toggle';
+        toggleBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const opened = card.classList.toggle('mob-links-open');
+          const enNow = state.appLang === 'en';
+          toggleBtn.textContent = opened
+            ? (enNow ? `▴ Hide modules (${cnt})` : `▴ Ẩn mục con (${cnt})`)
+            : (enNow ? `▾ Show modules (${cnt})` : `▾ Xem mục con (${cnt})`);
+        });
+        linksEl.parentNode.insertBefore(toggleBtn, linksEl);
+      }
+      const opened = card.classList.contains('mob-links-open');
+      toggleBtn.textContent = opened
+        ? (isEn ? `▴ Hide modules (${cnt})` : `▴ Ẩn mục con (${cnt})`)
+        : (isEn ? `▾ Show modules (${cnt})` : `▾ Xem mục con (${cnt})`);
+    });
+  }
+
   // Lifecycle & Resize listener
   window.addEventListener('resize', _setBodyMobileClasses);
+  window.addEventListener('mrl-sync-dirty-change', _syncMobileChrome);
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
       _setBodyMobileClasses();
-      setTimeout(_bindMobileHooks, 0);
+      setTimeout(() => {
+        _bindMobileHooks();
+        _enhanceMobilePortal();
+        _setupOverlayBackObserver();
+      }, 0);
     });
   } else {
     _setBodyMobileClasses();
     _bindMobileHooks();
+    _enhanceMobilePortal();
+    _setupOverlayBackObserver();
   }
 })();

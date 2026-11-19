@@ -13,8 +13,8 @@
   <link rel="stylesheet" href="./static/fonts.css?v=1" />
   <script>try{if(localStorage.getItem("mrl-theme")==="light"){document.documentElement.dataset.theme="light";var mc=document.querySelector('meta[name="theme-color"]');if(mc)mc.setAttribute("content","#FFFFFF");}if(localStorage.getItem("mrl-en-mode")!=="0")document.documentElement.classList.add("en-mode-on");if(localStorage.getItem("mrl-app-lang")==="en")document.documentElement.dataset.lang="en";}catch(e){}</script>
   <link rel="stylesheet" href="./static/styles.css?v=32" />
-  <link rel="stylesheet" href="./static/mobile.css?v=6" />
-  <meta name="mrl-build" content="20261119042039" />
+  <link rel="stylesheet" href="./static/mobile.css?v=7" />
+  <meta name="mrl-build" content="20261119044659" />
 </head>
 <body spellcheck="false">
 <input type="file" id="excel-import-input" accept=".xlsx,.xlsm" class="hidden" />
@@ -995,9 +995,10 @@
 
 <!-- ================= MOBILE PWA CHROME (CHỈ HIỆN TRÊN < 768px) ================= -->
 <div id="mobile-detail-topbar">
-  <button type="button" id="mob-back-btn" class="mob-back-btn" onclick="closeMobileDetailOverlay(false)">← Quay lại danh sách</button>
+  <button type="button" id="mob-back-btn" class="mob-back-btn" onclick="closeMobileDetailOverlay(false)">← Quay lại</button>
   <span id="mob-detail-id" class="mob-detail-id">---</span>
   <button type="button" id="mob-detail-lang-btn" class="mob-detail-lang-btn" onclick="toggleMobileQuickLang()" title="Chuyển nhanh ngôn ngữ VI / EN">VI</button>
+  <button type="button" id="mob-wakelock-btn" class="mob-wakelock-btn hidden" onclick="toggleMobileWakeLock()" title="Giữ sáng màn hình khi đo mạch">☀️</button>
   <select id="mob-detail-status" class="sel mob-detail-status hidden" onchange="onMobileDetailStatusChange(this.value)">
     <option value="mastered">🟢 Đã làm chủ</option>
     <option value="review">🟡 Cần xem lại</option>
@@ -1042,7 +1043,7 @@
   </div>
 </div>
 
-<script src="./static/js/core_store.js?v=2"></script>
+<script src="./static/js/core_store.js?v=3"></script>
 <script src="./static/js/01-core.js?v=11"></script>
 <script src="./static/js/02-boot.js?v=15"></script>
 <script src="./static/js/03-views.js?v=7"></script>
@@ -1055,6 +1056,6 @@
 <script src="./static/js/10-english-hub.js?v=10"></script>
 <script src="./static/a11y.js?v=8"></script>
 <script src="./static/ui.js?v=11"></script>
-<script src="./static/js/mobile_shell.js?v=7"></script>
+<script src="./static/js/mobile_shell.js?v=8"></script>
 </body>
 </html>

@@ -13,6 +13,21 @@
   const SYNC_CFG_KEY = 'mrl-cloud-sync-cfg';
   const AI_CFG_KEY = 'mrl-ai-cfg';
   const TRANS_CACHE_KEY = 'mrl-trans-cache-v1';
+  const UNSYNCED_KEY = 'mrl_has_unsynced';
+
+  function hasUnsyncedChanges() {
+    try { return localStorage.getItem(UNSYNCED_KEY) === '1'; } catch (_) { return false; }
+  }
+
+  function _setUnsyncedFlag(dirty) {
+    try {
+      if (dirty) localStorage.setItem(UNSYNCED_KEY, '1');
+      else localStorage.removeItem(UNSYNCED_KEY);
+    } catch (_) {}
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('mrl-sync-dirty-change', { detail: { dirty: Boolean(dirty) } }));
+    }
+  }
 
   let _mode = 'unknown'; // 'unknown' | 'online' | 'offline'
   let _snapshot = null;
@@ -551,7 +566,10 @@
     _refreshDerivedFields(snap);
     _snapshot = snap;
     await _idbSet('snapshot', snap);
-    if (scheduleSync) scheduleAutoPush();
+    if (scheduleSync) {
+      if (_mode === 'offline') _setUnsyncedFlag(true);
+      scheduleAutoPush();
+    }
     return snap;
   }
 
@@ -1777,25 +1795,115 @@
     }
     if (p === '/api/english/scan-mrl-records' && m === 'GET') {
       const cards = snap.english_cards || [];
-      const existingLow = new Set(cards.map((c) => String(c.term || '').toLowerCase()));
-      const candidates = [];
-      (snap.en_glossary || []).forEach((g) => {
-        if (!g.en || existingLow.has(g.en.toLowerCase())) return;
-        candidates.push({
-          term: g.en,
-          ipa: '/.../',
-          word_class: 'Noun',
-          category: _normalizeEnCat(g.category, g.en),
-          meaning_vi: g.vi || g.note || g.en,
-          example_en: `Check ${g.en} during system inspection.`,
-          example_vi: g.vi || '',
-          linked_record_id: 'GLOSSARY',
-        });
+      const existingLow = new Set(cards.map((c) => String(c.term || '').trim().toLowerCase()));
+      const existingDrillsLow = new Set((snap.english_combat_drills || []).map((d) => String(d.source_vi || '').trim().toLowerCase()));
+
+      const corpus = [];
+      (snap.repair_cases || []).forEach((r) => {
+        const txt = [
+          r.brand_model || '',
+          r.fault_symptom_raw || '',
+          r.root_cause_raw || '',
+          r.solution_raw || '',
+          r.note || '',
+          ...(r.fault_codes || []),
+          ...(r.component_tags || []),
+        ].join(' ');
+        corpus.push({ id: r.id, scope: 'MRL Repair', title: r.brand_model || r.id, text: txt, vi_line: r.fault_symptom_raw || r.root_cause_raw || '' });
       });
+      (snap.knowledge_items || []).forEach((k) => {
+        const txt = [k.topic_model || '', k.key_takeaway || '', k.core_concept_workflow || '', k.actionable_application || ''].join(' ');
+        corpus.push({ id: k.id, scope: 'MRL Knowledge', title: k.topic_model || k.id, text: txt, vi_line: k.key_takeaway || k.core_concept_workflow || '' });
+      });
+      (snap.plc_notes || []).forEach((pl) => {
+        const txt = [pl.title || '', pl.core_summary || '', pl.code_snippet || ''].join(' ');
+        corpus.push({ id: pl.id, scope: 'PLC', title: pl.title || pl.id, text: txt, vi_line: pl.core_summary || '' });
+      });
+      (snap.network_notes || []).forEach((n) => {
+        const txt = [
+          n.protocol || '',
+          n.target_device || '',
+          n.physical_wiring || '',
+          n.comm_settings || '',
+          n.troubleshooting_tips || '',
+        ].join(' ');
+        corpus.push({ id: n.id, scope: 'Network', title: n.target_device || n.protocol || n.id, text: txt, vi_line: n.troubleshooting_tips || n.physical_wiring || '' });
+      });
+
+      const candidateCards = [];
+      const seenCands = new Set();
+      (snap.en_glossary || []).forEach((g) => {
+        const enT = String(g.en || '').trim();
+        const viT = String(g.vi || '').trim();
+        const lowEn = enT.toLowerCase();
+        if (!enT || existingLow.has(lowEn) || seenCands.has(lowEn)) return;
+        const baseEn = enT.replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+        for (const item of corpus) {
+          const tLow = item.text.toLowerCase();
+          if ((baseEn.length >= 4 && tLow.includes(baseEn)) || (viT.length >= 4 && tLow.includes(viT.toLowerCase()))) {
+            seenCands.add(lowEn);
+            candidateCards.push({
+              term: enT,
+              ipa: '/.../',
+              word_class: enT.split(/\s+/).length >= 4 ? 'Lexical Chunk' : 'Noun',
+              category: _normalizeEnCat(g.category, enT),
+              meaning_vi: viT || g.note || enT,
+              example_en: `Observed in ${item.id}: technicians inspect ${enT} during diagnostics.`,
+              example_vi: `Trích từ ${item.id}: ${item.title}.`,
+              linked_record_id: item.id,
+              source_scope: item.scope,
+            });
+            break;
+          }
+        }
+      });
+
+      if (candidateCards.length < 6) {
+        (snap.en_glossary || []).forEach((g) => {
+          if (candidateCards.length >= 15) return;
+          const enT = String(g.en || '').trim();
+          const lowEn = enT.toLowerCase();
+          if (!enT || existingLow.has(lowEn) || seenCands.has(lowEn)) return;
+          seenCands.add(lowEn);
+          candidateCards.push({
+            term: enT,
+            ipa: '/.../',
+            word_class: enT.split(/\s+/).length >= 4 ? 'Lexical Chunk' : 'Noun',
+            category: _normalizeEnCat(g.category, enT),
+            meaning_vi: g.vi || g.note || enT,
+            example_en: `Check ${enT} during system inspection.`,
+            example_vi: g.vi || '',
+            linked_record_id: 'GLOSSARY',
+            source_scope: 'Glossary',
+          });
+        });
+      }
+
+      const candidateDrills = [];
+      for (const item of corpus) {
+        if (candidateDrills.length >= 6) break;
+        const line = String(item.vi_line || '').split(/[\n.]/)[0].trim();
+        if (line.length < 18 || existingDrillsLow.has(line.toLowerCase())) continue;
+        existingDrillsLow.add(line.toLowerCase());
+        const refTr = _offlineTechnicalTranslate(line, snap, 'vi', 'en');
+        const terms = _extractMatchingTerms(line, snap).slice(0, 3).map((t) => t.en);
+        candidateDrills.push({
+          drill_mode: 'translation',
+          category: item.scope === 'Network' ? 'Mạng truyền thông' : (item.scope === 'PLC' ? 'PLC & Tự động hóa' : 'Biến tần & Phần cứng'),
+          source_vi: line,
+          prompt_en: `Explain/report issue from ${item.id} (${item.title}) in Technical English:`,
+          target_keywords: terms.length ? terms : ['inspect', 'fault'],
+          reference_en: refTr,
+          spoken_en: refTr,
+          grammar_notes: `Trích xuất tự động từ ${item.id}.`,
+          linked_record_id: item.id,
+        });
+      }
+
       return _jsonResponse({
-        scanned_records: (snap.repair_cases?.length || 0) + (snap.knowledge_items?.length || 0) + (snap.plc_notes?.length || 0) + (snap.network_notes?.length || 0),
-        candidate_cards: candidates.slice(0, 15),
-        candidate_drills: [],
+        scanned_records: corpus.length,
+        candidate_cards: candidateCards.slice(0, 15),
+        candidate_drills: candidateDrills,
       });
     }
     if (p === '/api/english/extract-manual' && m === 'POST') {
@@ -2306,6 +2414,7 @@
         last_sync_at: data.last_sync_at,
         last_sync_status: data.cloud_sync?.last_sync_status || `↓${data.pulled} ↑${data.pushed} 🗑${data.deleted}`,
       });
+      _setUnsyncedFlag(false);
       if (data.bootstrap && typeof applyBootstrapData === 'function') {
         await _idbSet('snapshot', data.bootstrap);
         _snapshot = data.bootstrap;
@@ -2339,6 +2448,7 @@
     const nowIso = utcNowIso();
     const statusMsg = `OK (Offline Mobile) · ↓${stats.pulled} ↑${stats.pushed} 🗑${stats.deleted}`;
     saveSyncConfig({ github_token: tok, gist_id: gid, last_sync_at: nowIso, last_sync_status: statusMsg });
+    _setUnsyncedFlag(false);
     const boot = _bootstrapPayloadFromSnap(merged);
     if (typeof applyBootstrapData === 'function') applyBootstrapData(boot, true);
     return { ok: true, gist_id: gid, ...stats, last_sync_at: nowIso, bootstrap: boot };
@@ -2418,6 +2528,7 @@
   window.MRLCoreStore = {
     getMode: () => _mode,
     resolveAssetUrl,
+    hasUnsyncedChanges,
     ensureLocalSnapshot,
     saveLocalSnapshot,
     getAiConfig,
