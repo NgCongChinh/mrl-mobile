@@ -100,15 +100,21 @@
     padding-bottom: calc(62px + env(safe-area-inset-bottom));
   }
   .portal-topbar {
-    height: auto;
+    height: 50px;
     min-height: 50px;
-    padding: 8px 12px;
+    padding: 0 12px;
     gap: 8px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap !important;
+    overflow: hidden;
+    align-items: center;
+  }
+  .portal-brand {
+    flex: none;
   }
   .portal-subtag,
   #portal-btn-en-vocab,
   #portal-btn-en-mode,
+  #portal-btn-mobile-sync,
   .portal-top-right > button[onclick="triggerExcelImport()"],
   .portal-top-right > button[onclick="exportExcel()"] {
     display: none !important;
@@ -116,16 +122,33 @@
   .portal-top-right {
     margin-left: auto;
     gap: 6px;
+    flex: 0 1 auto;
+    min-width: 0;
+    flex-wrap: nowrap;
+    align-items: center;
   }
   .streak-pill {
     font-size: 11px;
     padding: 3px 8px;
+    min-width: 0;
+    max-width: 58vw;
+    flex: 0 1 auto;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .portal-top-right > .streak-pill .streak-days,
+  .portal-top-right > .streak-pill .streak-sep {
+    display: none !important;
   }
   .streak-pill .streak-mini-bar {
     display: none;
   }
+  .portal-top-right .lang-switch {
+    flex: none;
+  }
   .portal-container {
-    padding: 14px 12px 24px;
+    padding: 14px 12px 96px !important;
   }
   .portal-hero {
     margin-bottom: 14px;
@@ -690,19 +713,30 @@
     flex: 1;
     height: 100%;
     overflow-y: auto;
-    padding: 14px 12px 86px;
+    padding: 14px 12px 104px !important;
+    box-sizing: border-box !important;
     background: var(--bg);
   }
   .mob-sync-head {
     display: flex;
+    flex-wrap: nowrap;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
     margin-bottom: 12px;
   }
   .mob-sync-title {
-    font-size: 17px;
+    font-size: 15.5px;
     font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+  .mob-sync-head .badge {
+    flex: none;
+    white-space: nowrap;
+    font-size: 11px;
   }
   .mob-sync-grid-btns {
     display: grid;
@@ -748,5 +782,211 @@
     background: #EEF2FF;
     color: #3730A3;
     border-color: #4F46E5;
+  }
+
+  /* ==========================================================================
+     MOBILE FIXES v4 (strictly < 768px — Desktop untouched)
+     ========================================================================== */
+
+  /* 1. Vietnamese-safe font for all text labels (ASCII codes stay mono) */
+  .mob-sub-pill,
+  .toolbar .chip,
+  .list-head,
+  .row-title,
+  .row-sub,
+  .row-cat,
+  .row-step-count,
+  .msync-card-title,
+  .srs-cpill,
+  .srs-compact-streak,
+  .streak-pill,
+  .lbl,
+  .sec-title,
+  .portal-links-lbl,
+  .portal-enter-btn,
+  .portal-led-bar,
+  .search .inp {
+    font-family: var(--font-sans) !important;
+    letter-spacing: 0.01em !important;
+  }
+  .row-id,
+  .d-id,
+  .hex-cell,
+  .srs-fc-ipa,
+  .vb-ipa,
+  code,
+  pre {
+    font-family: var(--font-mono) !important;
+  }
+
+  /* 2. Layering: modals/lightbox/toasts above bottom nav (60) & detail top bar (58) */
+  .overlay {
+    z-index: 80 !important;
+  }
+  .lightbox {
+    z-index: 85 !important;
+  }
+  #toast-container {
+    z-index: 95 !important;
+  }
+
+  /* 4. List: no dimming, no right overflow, complete chip borders */
+  .list-body.has-selection .row:not(.selected) {
+    opacity: 1 !important;
+  }
+  .toolbar .chip {
+    border-width: 1px !important;
+    border-right-width: 1px !important;
+    border-radius: 6px !important;
+    white-space: nowrap;
+  }
+  .toolbar .chips {
+    padding-right: 6px;
+  }
+  .list-pane,
+  .list-body,
+  .row {
+    max-width: 100vw;
+    overflow-x: hidden;
+    box-sizing: border-box;
+  }
+  .row-top {
+    width: 100%;
+    overflow: hidden;
+  }
+  .row-cat {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .row-top .led {
+    flex: none;
+  }
+  .row-main {
+    min-width: 0;
+  }
+  .row-step-count {
+    max-width: 130px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 11px;
+  }
+  .toolbar .search {
+    flex: 1 1 100%;
+    max-width: 100%;
+    margin-left: 0;
+    min-width: 0;
+  }
+  .toolbar .sel {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  /* 5. 04 // ENGLISH compact study screen */
+  .srs-cpill {
+    flex: 0 0 auto !important;
+    white-space: nowrap !important;
+    padding: 6px 12px !important;
+    font-size: 12px !important;
+  }
+  .srs-compact-pills {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  #view-en-quiz .toolbar .sec-title {
+    display: none !important;
+  }
+  #view-en-quiz .toolbar {
+    padding: 6px 10px;
+    gap: 6px;
+  }
+  #view-en-quiz #en-quiz-gen-toggle-btn {
+    flex: none;
+    min-height: 34px;
+    font-size: 12px;
+    margin-left: auto;
+  }
+  #view-en-quiz .srs-compact-bar {
+    padding: 6px 10px;
+    gap: 6px;
+  }
+  .srs-compact-streak {
+    flex: none;
+    font-size: 11.5px;
+  }
+  .srs-mode-btn {
+    min-height: 36px !important;
+    font-size: 11.5px !important;
+    line-height: 1.25 !important;
+    padding: 4px 8px !important;
+  }
+  .oq-progress-row {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+  .oq-progress-meta {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .oq-progress-meta .badge:nth-child(n+3) {
+    display: none;
+  }
+  .oq-progress-row > div:last-child {
+    flex: none;
+  }
+  .oq-progress-row .btn {
+    padding: 4px 8px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  /* 6. Cloud sync panel form */
+  .msync-card .inp,
+  .msync-card .sel {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .msync-actions-mob {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px !important;
+  }
+  .msync-actions-mob .msync-act-sub {
+    min-height: 42px;
+    justify-content: center;
+  }
+  .msync-actions-mob .msync-act-main {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  /* 7. SVG icons in bottom nav */
+  .mob-nav-ico {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 20px;
+    line-height: 1;
+  }
+  .mob-nav-ico svg {
+    width: 20px;
+    height: 20px;
+    display: block;
   }
 }

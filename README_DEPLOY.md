@@ -1,6 +1,6 @@
 # MRL Workbench — Standalone Mobile PWA (`mobile_dist/`)
 
-- **Build ID:** `20261119025753`
+- **Build ID:** `20261119033034`
 - **Bundled Records:** `83` records + `57` SRS cards
 
 ## Cách xuất bản để dùng độc lập mọi nơi khi tắt máy tính

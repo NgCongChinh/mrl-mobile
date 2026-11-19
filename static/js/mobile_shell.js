@@ -53,7 +53,8 @@
 
     // FAB visibility
     if (fabEl) {
-      const showFab = Boolean(state.activeWorkspace) && !_mobileSyncOpen && !_mobileDetail && state.activeTab !== 'dictionary' && state.activeTab !== 'scratchpad';
+      const FAB_TABS = ['repairs', 'knowledge', 'plc', 'network', 'en-vocab-bank'];
+      const showFab = Boolean(state.activeWorkspace) && !_mobileSyncOpen && !_mobileDetail && FAB_TABS.includes(state.activeTab);
       fabEl.classList.toggle('hidden', !showFab);
     }
 
@@ -291,10 +292,10 @@
           <input id="${prefix}-auto-sync" type="checkbox" ${autoOn ? 'checked' : ''} />
           <span>${isEn ? 'Auto two-way sync on app start / mobile edits' : 'Tự động đồng bộ 2 chiều khi mở máy tính / sửa trên điện thoại'}</span>
         </label>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
-          <button type="button" class="btn btn-sm" onclick="createMobileGistNow('${prefix}')">✨ ${isEn ? 'Create Private Gist' : 'Tự tạo Private Gist mới'}</button>
-          <button type="button" class="btn btn-sm" onclick="saveMobileSyncConfig('${prefix}')">💾 ${isEn ? 'Save Config' : 'Lưu cấu hình'}</button>
-          <button type="button" class="btn btn-sm btn-primary" onclick="triggerCloudSyncNow('${prefix}')">🔄 ${isEn ? 'Sync Now' : 'Đồng bộ Cloud ngay'}</button>
+        <div class="msync-actions ${prefix === 'mob' ? 'msync-actions-mob' : ''}" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+          <button type="button" class="btn btn-sm msync-act-sub" onclick="createMobileGistNow('${prefix}')">✨ ${isEn ? 'Create Gist' : 'Tạo Gist mới'}</button>
+          <button type="button" class="btn btn-sm msync-act-sub" onclick="saveMobileSyncConfig('${prefix}')">💾 ${isEn ? 'Save Config' : 'Lưu cấu hình'}</button>
+          <button type="button" class="btn btn-sm btn-primary msync-act-main" onclick="triggerCloudSyncNow('${prefix}')">🔄 ${isEn ? 'Sync Now' : 'Đồng bộ Cloud ngay'}</button>
         </div>
       </div>`;
   }

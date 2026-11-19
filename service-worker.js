@@ -1,5 +1,5 @@
-/* MRL PWA Service Worker — Network-First OTA Auto-Update (20261119025753) */
-const CACHE_NAME = 'mrl-pwa-20261119025753';
+/* MRL PWA Service Worker — Network-First OTA Auto-Update (20261119033034) */
+const CACHE_NAME = 'mrl-pwa-20261119033034';
 const CORE_SHELL = [
   './',
   './index.html',
