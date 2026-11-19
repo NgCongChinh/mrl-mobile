@@ -105,18 +105,32 @@
   .portal-topbar {
     height: 50px;
     min-height: 50px;
-    padding: 0 12px;
-    gap: 8px;
+    padding: 0 10px;
+    gap: 6px;
     flex-wrap: nowrap !important;
     overflow: hidden;
     align-items: center;
   }
   .portal-brand {
+    gap: 5px;
     flex: none;
   }
   .portal-brand .brand-logo {
-    width: 26px;
-    height: 26px;
+    height: 22px;
+    width: auto;
+    padding: 2px 4px;
+    border-radius: 5px;
+  }
+  html[data-theme="light"] .portal-brand .brand-logo {
+    height: 20px;
+    padding: 0;
+    background: transparent;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .portal-brand .brand-name {
+    font-size: 15px;
+    letter-spacing: 0.01em;
   }
   .portal-subtag,
   #portal-btn-en-vocab,
@@ -128,11 +142,27 @@
   }
   .portal-top-right {
     margin-left: auto;
-    gap: 6px;
+    gap: 5px;
     flex: 0 1 auto;
     min-width: 0;
     flex-wrap: nowrap;
     align-items: center;
+  }
+  .portal-top-right .theme-btn {
+    font-size: 0;
+    width: 30px;
+    min-width: 30px;
+    height: 28px;
+    padding: 0;
+    justify-content: center;
+  }
+  .portal-top-right .theme-btn::before {
+    content: '☀';
+    font-size: 14px;
+    line-height: 1;
+  }
+  html[data-theme="light"] .portal-top-right .theme-btn::before {
+    content: '☾';
   }
   .streak-pill {
     font-size: 11px;

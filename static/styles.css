@@ -57,16 +57,29 @@ input, select, textarea { font-family: inherit; color: var(--text); }
   display: flex; flex-direction: column; min-height: 0;
 }
 .brand {
-  height: 48px; padding: 0 16px; display: flex; align-items: center; gap: 10px;
+  height: 48px; padding: 0 14px; display: flex; align-items: center; gap: 7px;
   border-bottom: 1px solid var(--line);
 }
 .brand-mark { width: 8px; height: 18px; background: var(--amber); }
 .brand-logo {
-  width: 28px; height: 28px; border-radius: 6px; object-fit: contain;
-  background: #FFFFFF; padding: 2px; flex: none; display: block;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14);
+  height: 24px;
+  width: auto;
+  object-fit: contain;
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 6px;
+  padding: 3px 5px;
+  flex: none;
+  display: block;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
-.brand-name { font-family: var(--font-mono); font-weight: 700; font-size: 16px; letter-spacing: .12em; }
+.brand-name {
+  font-family: var(--font-sans, 'Inter', system-ui, -apple-system, sans-serif);
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: 0.015em;
+  line-height: 1;
+  color: var(--text);
+}
 .brand-sub { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--text-3); letter-spacing: .08em; }
 
 .nav { padding: 6px 0; border-bottom: 1px solid var(--line); }
@@ -441,7 +454,7 @@ textarea.inp { resize: vertical; line-height: 1.5; }
   height: 50px; flex: none; padding: 0 28px; display: flex; align-items: center; justify-content: space-between;
   background: var(--panel); border-bottom: 1px solid var(--line); gap: 16px;
 }
-.portal-brand { display: flex; align-items: center; gap: 10px; white-space: nowrap; flex: none; }
+.portal-brand { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; flex: none; }
 .portal-subtag { font-family: var(--font-mono); font-size: 12px; color: var(--text-3); letter-spacing: .08em; margin-left: 6px; padding-left: 12px; border-left: 1px solid var(--line-strong); white-space: nowrap; }
 .portal-top-right { display: flex; align-items: center; gap: 8px; white-space: nowrap; flex-wrap: nowrap; }
 .portal-meta-txt { font-size: 12px; color: var(--text-3); margin-right: 6px; white-space: nowrap; }
@@ -986,7 +999,16 @@ html[data-theme="light"] {
 }
 html[data-theme="light"] ::-webkit-scrollbar-thumb { background: #CBD5E1; }
 html[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
-html[data-theme="light"] .brand-logo { box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.14); }
+html[data-theme="light"] .brand-logo {
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  height: 22px;
+  box-shadow: none;
+}
+html[data-theme="light"] .portal-brand .brand-name {
+  color: #192582;
+}
 html[data-theme="light"] select.sel,
 html[data-theme="light"] select.inp { color-scheme: light; }
 html[data-theme="light"] .sel {
