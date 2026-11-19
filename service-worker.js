@@ -1,5 +1,5 @@
-/* MRL PWA Service Worker — Network-First OTA Auto-Update (20261119044659) */
-const CACHE_NAME = 'mrl-pwa-20261119044659';
+/* NC38 PWA Service Worker — Network-First OTA Auto-Update (20261119073106) */
+const CACHE_NAME = 'mrl-pwa-20261119073106';
 const CORE_SHELL = [
   './',
   './index.html',
@@ -23,7 +23,10 @@ const CORE_SHELL = [
   './static/js/10-english-hub.js',
   './static/js/mobile_shell.js',
   './static/icons/icon-192.png',
-  './static/icons/icon-512.png'
+  './static/icons/icon-512.png',
+  './static/icons/logo.png',
+  './static/icons/apple-touch-icon.png',
+  './static/nc38_icon.ico'
 ];
 
 self.addEventListener('install', (event) => {

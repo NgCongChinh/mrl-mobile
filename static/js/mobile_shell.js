@@ -608,7 +608,7 @@
       lanReachable === true
         ? `<div class="msync-status-line" style="margin-top:8px;border-color:rgba(16,185,129,0.45);color:#34D399;">🟢 Máy chủ Wi-Fi LAN đang mở (<code>${escapeHtml(lanUrl)}</code>) — sẵn sàng quét QR!</div>`
         : lanReachable === false
-        ? `<div class="msync-status-line" style="margin-top:8px;border-color:rgba(239,68,68,0.45);color:#F87171;">🔴 Máy chủ hiện chỉ lắng nghe <code>127.0.0.1</code> (chưa mở Wi-Fi LAN). Hãy tắt toàn bộ cửa sổ MRL rồi mở lại bằng <code>MRL.lnk</code> hoặc <code>MRL.exe</code>.</div>`
+        ? `<div class="msync-status-line" style="margin-top:8px;border-color:rgba(239,68,68,0.45);color:#F87171;">🔴 Máy chủ hiện chỉ lắng nghe <code>127.0.0.1</code> (chưa mở Wi-Fi LAN). Hãy tắt toàn bộ cửa sổ NC38 rồi mở lại bằng <code>NC38.lnk</code> hoặc <code>NC38.exe</code>.</div>`
         : '';
 
     body.innerHTML = `

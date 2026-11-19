@@ -61,6 +61,11 @@ input, select, textarea { font-family: inherit; color: var(--text); }
   border-bottom: 1px solid var(--line);
 }
 .brand-mark { width: 8px; height: 18px; background: var(--amber); }
+.brand-logo {
+  width: 28px; height: 28px; border-radius: 6px; object-fit: contain;
+  background: #FFFFFF; padding: 2px; flex: none; display: block;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
 .brand-name { font-family: var(--font-mono); font-weight: 700; font-size: 16px; letter-spacing: .12em; }
 .brand-sub { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--text-3); letter-spacing: .08em; }
 
@@ -981,6 +986,7 @@ html[data-theme="light"] {
 }
 html[data-theme="light"] ::-webkit-scrollbar-thumb { background: #CBD5E1; }
 html[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+html[data-theme="light"] .brand-logo { box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.14); }
 html[data-theme="light"] select.sel,
 html[data-theme="light"] select.inp { color-scheme: light; }
 html[data-theme="light"] .sel {

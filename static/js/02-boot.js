@@ -202,7 +202,7 @@ function computeWorkspaceStats() {
 }
 
 function renderPortalScreen() {
-  document.title = 'MRL';
+  document.title = 'NC38';
   const stats = computeWorkspaceStats();
   const isEn = state.appLang === 'en';
 
@@ -609,7 +609,7 @@ function syncFlashcardFilterOptions() {
 }
 
 function renderHeaderStats() {
-  document.title = 'MRL';
+  document.title = 'NC38';
   const stats = computeWorkspaceStats();
   const ws = state.activeWorkspace;
   if (!ws) {

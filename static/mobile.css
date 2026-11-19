@@ -114,6 +114,10 @@
   .portal-brand {
     flex: none;
   }
+  .portal-brand .brand-logo {
+    width: 26px;
+    height: 26px;
+  }
   .portal-subtag,
   #portal-btn-en-vocab,
   #portal-btn-en-mode,

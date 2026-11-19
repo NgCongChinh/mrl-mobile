@@ -561,7 +561,7 @@ document.addEventListener('focusin', (e) => {
 });
 
 window.addEventListener('DOMContentLoaded', async () => {
-  document.title = 'MRL';
+  document.title = 'NC38';
   _disableSpellcheckGlobally();
   _initSplitResizer();
   openPortalScreen();

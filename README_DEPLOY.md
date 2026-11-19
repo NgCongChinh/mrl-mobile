@@ -1,6 +1,6 @@
-# MRL Workbench — Standalone Mobile PWA (`mobile_dist/`)
+# NC38 — Standalone Mobile PWA (`mobile_dist/`)
 
-- **Build ID:** `20261119044659`
+- **Build ID:** `20261119073106`
 - **Bundled Records:** `83` records + `57` SRS cards
 
 ## Cách xuất bản để dùng độc lập mọi nơi khi tắt máy tính
