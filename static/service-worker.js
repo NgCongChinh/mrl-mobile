@@ -1,9 +1,9 @@
-/* NC38 PWA Service Worker — Network-First OTA Auto-Update (20261119073106) */
-const CACHE_NAME = 'mrl-pwa-20261119073106';
+/* NC38 PWA Service Worker — Network-First OTA Auto-Update (20261119073841) */
+const CACHE_NAME = 'mrl-pwa-20261119073841';
 const CORE_SHELL = [
   './',
   './index.html',
-  './manifest.json',
+  './manifest.json?v=nc2',
   './mrl_initial_seed.json',
   './static/fonts.css',
   './static/styles.css',
@@ -22,8 +22,8 @@ const CORE_SHELL = [
   './static/js/09-english.js',
   './static/js/10-english-hub.js',
   './static/js/mobile_shell.js',
-  './static/icons/icon-192.png',
-  './static/icons/icon-512.png',
+  './static/icons/icon-nc-192.png',
+  './static/icons/icon-nc-512.png',
   './static/icons/logo.png',
   './static/icons/apple-touch-icon.png',
   './static/nc38_icon.ico'
