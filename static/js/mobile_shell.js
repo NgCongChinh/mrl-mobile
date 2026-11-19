@@ -390,6 +390,13 @@
     const qrSvg = info?.qr_svg || '';
     const syncCfg = info?.cloud_sync || (window.MRLSyncEngine ? MRLSyncEngine.getConfig() : {});
     const distMeta = info?.mobile_dist;
+    const ghPages = info?.gh_pages || {};
+    const ghLiveUrl = ghPages.live_url || ghPages.last_url || '';
+    const ghStatusText = ghPages.last_status
+      ? `${escapeHtml(ghPages.last_status)}${ghPages.last_published_at ? ` · <span class="mono">${escapeHtml(ghPages.last_published_at)}</span>` : ''}`
+      : (ghLiveUrl
+        ? `Sẵn sàng đẩy tới <span class="mono">${escapeHtml(ghPages.repo_slug)} (${escapeHtml(ghPages.branch || 'main')})</span>`
+        : 'Nhập Repo GitHub Pages (VD: <code>username/mrl-mobile</code>) để bật 1-Click Publish.');
     const lanStatusHtml =
       lanReachable === true
         ? `<div class="msync-status-line" style="margin-top:8px;border-color:rgba(16,185,129,0.45);color:#34D399;">🟢 Máy chủ Wi-Fi LAN đang mở (<code>${escapeHtml(lanUrl)}</code>) — sẵn sàng quét QR!</div>`
@@ -424,15 +431,35 @@
       <div class="msync-card">
         <div class="msync-card-title">🚀 ĐÓNG GÓI MOBILE ĐỘC LẬP (CHẠY KHI TẮT MÁY TÍNH + OTA AUTO-UPDATE)</div>
         <div style="font-size:12.5px;color:var(--text-3);margin-bottom:8px;">
-          Xuất toàn bộ giao diện Mobile PWA + snapshot dữ liệu từ <code>mrl_database.db</code> ra thư mục <code>mobile_dist/</code> (sẵn sàng đẩy lên GitHub Pages / Cloudflare Pages / Vercel để dùng độc lập mọi nơi).
+          Xuất toàn bộ giao diện Mobile PWA + dữ liệu từ <code>mrl_database.db</code> ra <code>mobile_dist/</code> và đẩy thẳng lên GitHub Pages chỉ với 1 click (tự xóa <code>.git</code> &amp; kiểm tra sạch Token/DB trước khi push).
         </div>
         <div id="desk-dist-meta" class="msync-status-line" style="margin-bottom:10px;">
           ${distMeta
             ? `✓ Bản đóng gói gần nhất: <span class="mono">${escapeHtml(distMeta.built_at)}</span> · ${distMeta.seed_records} bản ghi + ${distMeta.seed_cards || 57} thẻ SRS · ${distMeta.files_count} files`
             : 'Chưa đóng gói mobile_dist/ trong lần chạy này.'}
         </div>
+        <div class="fgrid c2" style="margin-bottom:8px;">
+          <div>
+            <label class="lbl">GitHub Pages Repo</label>
+            <input id="desk-ghpages-repo" class="inp mono" type="text" value="${escapeHtml(ghPages.repo_slug || '')}" placeholder="tên-github/mrl-mobile" />
+          </div>
+          <div>
+            <label class="lbl">Branch</label>
+            <input id="desk-ghpages-branch" class="inp mono" type="text" value="${escapeHtml(ghPages.branch || 'main')}" placeholder="main" />
+          </div>
+        </div>
+        <div style="margin-bottom:8px;">
+          <label class="lbl">Token đẩy Repo (tùy chọn — bỏ trống sẽ tự dùng Token Cloud Sync ở trên, cần quyền repo) ${ghPages.has_own_token ? '<b style="color:var(--green);">✓ Đã lưu riêng</b>' : ''}</label>
+          <input id="desk-ghpages-token" class="inp mono" type="password" autocomplete="off"
+            placeholder="${ghPages.has_own_token ? '******** (giữ nguyên nếu không đổi)' : 'Bỏ trống để dùng lại Token Cloud Sync ở trên (hoặc dán Token có quyền repo)'}" />
+        </div>
+        <div id="desk-ghpages-status" class="msync-status-line" style="margin-bottom:10px;">
+          ${ghStatusText}${ghLiveUrl ? ` · <a href="${escapeHtml(ghLiveUrl)}" target="_blank" rel="noopener" style="color:var(--amber);text-decoration:underline;">${escapeHtml(ghLiveUrl)}</a>` : ''}
+        </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" id="desk-publish-gh-btn" class="btn btn-sm btn-primary" onclick="triggerPublishGithubPages()">☁️ Build &amp; Đẩy lên GitHub Pages</button>
           <button type="button" id="desk-build-dist-btn" class="btn btn-sm btn-indigo" onclick="triggerBuildMobileDist()">🚀 Xuất &amp; Cập nhật gói Mobile (mobile_dist/)</button>
+          <button type="button" class="btn btn-sm" onclick="saveGithubPagesConfig()">💾 Lưu Repo</button>
           <button type="button" class="btn btn-sm" onclick="MRLSyncEngine.exportBackupJson()">📤 Tải Snapshot JSON</button>
         </div>
       </div>`;
@@ -528,6 +555,87 @@
       showToast(err.message, 'error');
     } finally {
       if (btn) btn.disabled = false;
+    }
+  };
+
+  window.saveGithubPagesConfig = async function () {
+    const repo = (document.getElementById('desk-ghpages-repo')?.value || '').trim();
+    const branch = (document.getElementById('desk-ghpages-branch')?.value || 'main').trim() || 'main';
+    const tok = (document.getElementById('desk-ghpages-token')?.value || '').trim();
+    try {
+      const res = await fetch('/api/mobile/github-pages-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repo_slug: repo,
+          branch,
+          github_token: tok || '__KEEP__',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Không thể lưu cấu hình GitHub Pages');
+      showToast(`✓ Đã lưu Repo GitHub Pages: ${data.repo_slug || '(trống)'} (${data.branch})`, 'success');
+      openMobileSyncModal();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  };
+
+  window.triggerPublishGithubPages = async function () {
+    const btn = document.getElementById('desk-publish-gh-btn');
+    const buildBtn = document.getElementById('desk-build-dist-btn');
+    const statusEl = document.getElementById('desk-ghpages-status');
+    const distEl = document.getElementById('desk-dist-meta');
+    const repo = (document.getElementById('desk-ghpages-repo')?.value || '').trim();
+    const branch = (document.getElementById('desk-ghpages-branch')?.value || 'main').trim() || 'main';
+    const ownTok = (document.getElementById('desk-ghpages-token')?.value || '').trim();
+    const syncTok = (document.getElementById('desk-gh-token')?.value || '').trim();
+    const tokenToSend = ownTok || syncTok || '';
+
+    if (!repo) {
+      showToast('Vui lòng nhập GitHub Pages Repo (dạng username/mrl-mobile)', 'error');
+      document.getElementById('desk-ghpages-repo')?.focus();
+      return;
+    }
+
+    if (btn) btn.disabled = true;
+    if (buildBtn) buildBtn.disabled = true;
+    if (statusEl) {
+      statusEl.innerHTML = '⏳ Đang build <code>mobile_dist/</code> &amp; đẩy lên GitHub Pages...';
+    }
+    try {
+      showToast('☁️ Đang build & đẩy mobile_dist/ lên GitHub Pages...', 'info');
+      const res = await fetch('/api/mobile/publish-github', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repo_slug: repo,
+          branch,
+          github_token: tokenToSend,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Đẩy lên GitHub Pages thất bại');
+
+      const liveUrl = data.live_url || '';
+      const stamp = data.build_stamp || '';
+      if (statusEl) {
+        statusEl.innerHTML = `✓ Đã đẩy bản <span class="mono">${escapeHtml(stamp)}</span> lên GitHub Pages — chờ ~1 phút rồi bấm <b>OTA Update</b> trên điện thoại${liveUrl ? ` · <a href="${escapeHtml(liveUrl)}" target="_blank" rel="noopener" style="color:var(--amber);text-decoration:underline;">${escapeHtml(liveUrl)}</a>` : ''}`;
+      }
+      if (distEl && data.built_at) {
+        distEl.innerHTML = `✓ Bản đóng gói gần nhất: <span class="mono">${escapeHtml(data.built_at)}</span> · ${data.seed_records} bản ghi + ${data.seed_cards || 57} thẻ SRS · ${data.files_count} files`;
+      }
+      const ownTokInp = document.getElementById('desk-ghpages-token');
+      if (ownTokInp) ownTokInp.value = '';
+      showToast(`✓ Đã đẩy bản ${stamp} lên GitHub Pages thành công!`, 'success');
+    } catch (err) {
+      if (statusEl) {
+        statusEl.innerHTML = `<span style="color:#F87171;">✗ ${escapeHtml(err.message)}</span>`;
+      }
+      showToast(err.message, 'error');
+    } finally {
+      if (btn) btn.disabled = false;
+      if (buildBtn) buildBtn.disabled = false;
     }
   };
 

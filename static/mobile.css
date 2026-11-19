@@ -805,7 +805,16 @@
   .portal-links-lbl,
   .portal-enter-btn,
   .portal-led-bar,
+  .portal-badge,
+  .portal-link-btn .lk-cnt,
+  .oq-progress-row,
+  .oq-progress-row .btn,
+  .srs-fc-card .mono,
   .search .inp {
+    font-family: var(--font-sans) !important;
+    letter-spacing: 0.01em !important;
+  }
+  .msync-card .inp::placeholder {
     font-family: var(--font-sans) !important;
     letter-spacing: 0.01em !important;
   }
@@ -883,6 +892,23 @@
     min-width: 0;
     max-width: 100%;
   }
+  #view-repairs .toolbar .sel,
+  #view-knowledge .toolbar .sel,
+  #view-plc .toolbar .sel,
+  #view-network .toolbar .sel {
+    flex: 0 0 132px !important;
+    max-width: 138px !important;
+    min-width: 0 !important;
+  }
+  #view-repairs .toolbar .search,
+  #view-knowledge .toolbar .search,
+  #view-plc .toolbar .search,
+  #view-network .toolbar .search {
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    margin-left: 0 !important;
+  }
 
   /* 5. 04 // ENGLISH compact study screen */
   .srs-cpill {
@@ -896,22 +922,49 @@
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
-  #view-en-quiz .toolbar .sec-title {
+  #view-en-quiz .toolbar .sec-title,
+  #view-en-quiz #en-quiz-type-pills:empty {
     display: none !important;
   }
   #view-en-quiz .toolbar {
     padding: 6px 10px;
     gap: 6px;
   }
+  #view-en-quiz .toolbar:has(#en-quiz-type-pills:empty) {
+    height: 0 !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    overflow: visible !important;
+    position: relative;
+    z-index: 5;
+  }
   #view-en-quiz #en-quiz-gen-toggle-btn {
     flex: none;
-    min-height: 34px;
-    font-size: 12px;
+    padding: 4px 10px !important;
+    min-height: 28px !important;
+    font-size: 12px !important;
+    line-height: 1.2 !important;
     margin-left: auto;
   }
+  #view-en-quiz .toolbar:has(#en-quiz-type-pills:empty) #en-quiz-gen-toggle-btn {
+    position: absolute;
+    top: 6px;
+    right: 10px;
+    z-index: 6;
+  }
   #view-en-quiz .srs-compact-bar {
+    position: relative;
     padding: 6px 10px;
     gap: 6px;
+  }
+  #view-en-quiz .srs-compact-streak {
+    flex: none;
+    font-size: 11.5px;
+    max-width: calc(100% - 144px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .srs-compact-streak {
     flex: none;
