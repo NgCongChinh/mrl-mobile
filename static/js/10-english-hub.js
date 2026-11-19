@@ -1193,7 +1193,7 @@ function renderEnCoachView() {
       }
       ${lampsHtml}
       <div class="coach-answer-wrap">
-        <label class="lbl" style="display:block;margin-bottom:5px;">CÂU TRẢ LỜI / DỊCH TIẾNG ANH CỦA BẠN (Ctrl+Enter để nộp):</label>
+        <label class="lbl" style="display:block;margin-bottom:5px;">CÂU TRẢ LỜI / DỊCH TIẾNG ANH CỦA BẠN<span class="desk-kbd-hint"> (Ctrl+Enter để nộp)</span>:</label>
         <textarea id="en-coach-user-ta" class="coach-user-ta" spellcheck="false"
           placeholder="Viết hoặc bấm Micro 🎙️ nói câu Tiếng Anh (cố gắng lồng ghép các từ khóa mục tiêu phía trên)..."
           oninput="updateCoachKeywordLampsLive(this.value)"

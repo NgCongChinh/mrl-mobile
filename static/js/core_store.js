@@ -411,11 +411,23 @@
     const compMap = {};
     const faultMap = {};
     reps.forEach((r) => {
-      (r.component_tags || []).forEach((t) => { compMap[t] = (compMap[t] || 0) + 1; });
-      (r.fault_codes || []).forEach((f) => { faultMap[f] = (faultMap[f] || 0) + 1; });
+      (r.component_tags || []).forEach((t) => {
+        if (!compMap[t]) compMap[t] = { tag: t, repair_count: 0, knowledge_count: 0, total: 0 };
+        compMap[t].repair_count += 1;
+        compMap[t].total += 1;
+      });
+      (r.fault_codes || []).forEach((f) => {
+        if (!faultMap[f]) faultMap[f] = { tag: f, repair_count: 0, knowledge_count: 0, total: 0 };
+        faultMap[f].repair_count += 1;
+        faultMap[f].total += 1;
+      });
     });
     knws.forEach((k) => {
-      (k.component_tags || []).forEach((t) => { compMap[t] = (compMap[t] || 0) + 1; });
+      (k.component_tags || []).forEach((t) => {
+        if (!compMap[t]) compMap[t] = { tag: t, repair_count: 0, knowledge_count: 0, total: 0 };
+        compMap[t].knowledge_count += 1;
+        compMap[t].total += 1;
+      });
     });
 
     snap.metadata = {
@@ -431,8 +443,8 @@
       generated_at: utcNowIso(),
     };
     snap.tags_dictionary = {
-      component_tags: Object.entries(compMap).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([tag, count]) => ({ tag, count })),
-      fault_codes: Object.entries(faultMap).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([code, count]) => ({ code, count })),
+      component_tags: Object.values(compMap).sort((a, b) => b.total - a.total || a.tag.localeCompare(b.tag)),
+      fault_codes: Object.values(faultMap).sort((a, b) => b.total - a.total || a.tag.localeCompare(b.tag)),
     };
     snap.srs_counts = _computeSrsCounts(snap.english_cards || []);
     snap.english_streak = _computeStreakSummary(snap.english_streak_logs || []);

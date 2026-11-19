@@ -310,18 +310,26 @@ function renderNetworkDetail(n, currentIdx = 0, total = 1) {
 // 05 Từ điển linh kiện & mã lỗi + Drawer liên kết chéo
 // ---------------------------------------------------------------------------
 function dictRows(list, kind) {
-  if (!list.length) return '<div class="empty">KHÔNG CÓ KẾT QUẢ</div>';
-  return list.map((it) => `
-    <button type="button" class="dict-row" onclick="openCrossRefDrawer('${escapeHtml(it.tag)}')">
-      <span class="dict-name"><span class="tag tag-${kind}" style="pointer-events:none;">${escapeHtml(it.tag)}</span></span>
-      <span class="dict-cnt">Ca sửa <b>${it.repair_count}</b></span>
-      <span class="dict-cnt">Kiến thức <b>${it.knowledge_count}</b></span>
-    </button>`).join('');
+  const isEn = state.appLang === 'en';
+  if (!list.length) return `<div class="empty">${isEn ? 'NO RESULTS' : 'KHÔNG CÓ KẾT QUẢ'}</div>`;
+  const repLbl = isEn ? 'Repairs' : 'Ca sửa';
+  const knwLbl = isEn ? 'SOP' : 'Kiến thức';
+  return list.map((it) => {
+    const tag = String(it.tag || it.code || '').trim();
+    const repCnt = Number(it.repair_count ?? it.count ?? 0);
+    const knwCnt = Number(it.knowledge_count ?? 0);
+    return `
+    <button type="button" class="dict-row" onclick="openCrossRefDrawer('${escapeHtml(tag)}')">
+      <span class="dict-name"><span class="tag tag-${kind}" style="pointer-events:none;">${escapeHtml(tag)}</span></span>
+      <span class="dict-cnt">${repLbl} <b>${repCnt}</b></span>
+      <span class="dict-cnt">${knwLbl} <b>${knwCnt}</b></span>
+    </button>`;
+  }).join('');
 }
 function renderDictionaryView() {
   const q = (document.getElementById('dict-search-input')?.value || '').trim().toLowerCase().replace(/^#/, '');
-  const comps = (state.tagsDictionary.component_tags || []).filter((i) => !q || i.tag.toLowerCase().includes(q));
-  const faults = (state.tagsDictionary.fault_codes || []).filter((i) => !q || i.tag.toLowerCase().includes(q));
+  const comps = (state.tagsDictionary.component_tags || []).filter((i) => !q || String(i.tag || i.code || '').toLowerCase().includes(q));
+  const faults = (state.tagsDictionary.fault_codes || []).filter((i) => !q || String(i.tag || i.code || '').toLowerCase().includes(q));
   document.getElementById('dict-comp-count').textContent = comps.length;
   document.getElementById('dict-fault-count').textContent = faults.length;
   document.getElementById('dict-comp-grid').innerHTML = dictRows(comps, 'comp');
