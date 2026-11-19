@@ -4,12 +4,15 @@
 function renderAttachmentSection(parentType, parentId, attachments, showDropzone = true) {
   if (!showDropzone && (!attachments || !attachments.length)) return '';
   const gallery = attachments.length
-    ? `<div class="gallery">${attachments.map((a) => `
+    ? `<div class="gallery">${attachments.map((a) => {
+        const resolved = typeof resolveAssetUrl === 'function' ? resolveAssetUrl(a.file_path) : a.file_path;
+        return `
         <div class="shot">
-          <img src="${escapeHtml(a.file_path)}" alt="" onclick="openLightbox('${escapeHtml(a.file_path)}', '${escapeHtml(a.caption || parentId)}')" />
+          <img src="${escapeHtml(resolved)}" alt="" onclick="openLightbox('${escapeHtml(resolved)}', '${escapeHtml(a.caption || parentId)}')" />
           <div class="shot-cap"><span title="${escapeHtml(a.caption || '')}">${escapeHtml(a.caption || 'ẢNH')}</span>
             <button type="button" onclick="deleteAttachment(${a.attachment_id})">Xóa</button></div>
-        </div>`).join('')}</div>`
+        </div>`;
+      }).join('')}</div>`
     : '';
 
   const dropzoneHtml = showDropzone ? `
@@ -108,7 +111,8 @@ async function deleteAttachment(id) {
   } catch (err) { showToast(err.message, 'error'); }
 }
 function openLightbox(src, caption) {
-  document.getElementById('lightbox-img').src = src;
+  const resolved = typeof resolveAssetUrl === 'function' ? resolveAssetUrl(src) : src;
+  document.getElementById('lightbox-img').src = resolved || '';
   document.getElementById('lightbox-caption').textContent = caption || '';
   document.getElementById('lightbox-modal').classList.remove('hidden');
 }
@@ -206,7 +210,7 @@ function renderFloatingCanvasLayer(boxEl, layerEl, images, baseMinH, onChanged) 
           <button type="button" class="del" title="Xóa ảnh">×</button>
         </span>
       </div>
-      <div class="fimg-body"><img src="${escapeHtml(img.url)}" draggable="false" alt="" /></div>
+      <div class="fimg-body"><img src="${escapeHtml(typeof resolveAssetUrl === 'function' ? resolveAssetUrl(img.url) : img.url)}" draggable="false" alt="" /></div>
       <div class="fimg-resize" title="Kéo để chỉnh to/nhỏ"></div>`;
 
     const [zoomBtn, delBtn] = item.querySelectorAll('.fimg-bar-btns button');
@@ -848,10 +852,11 @@ function renderCustomSectionsHtml(sections = [], prefixKey = 'sec', highlightTag
     const minH = imgs.length ? Math.max(90, ...imgs.map((im) => (Number(im.y) || 0) + (Number(im.height) || 180) + 16)) : 0;
     const imgsHtml = imgs.map((im) => {
       const ix = Math.max(0, Math.round(im.x || 0));
+      const resolvedUrl = typeof resolveAssetUrl === 'function' ? resolveAssetUrl(im.url) : im.url;
       return `
       <div class="detail-floating-img" style="left:${ix}px; top:${Math.round(im.y || 0)}px; width:${Math.round(im.width || 280)}px; max-width:calc(100% - ${ix + 8}px); height:${Math.round(im.height || 180)}px;"
-           onclick="openLightbox('${escapeHtml(im.url)}', '${escapeHtml(title)}')">
-        <img src="${escapeHtml(im.url)}" alt="${escapeHtml(title)}" />
+           onclick="openLightbox('${escapeHtml(resolvedUrl)}', '${escapeHtml(title)}')">
+        <img src="${escapeHtml(resolvedUrl)}" alt="${escapeHtml(title)}" />
       </div>`;
     }).join('');
 

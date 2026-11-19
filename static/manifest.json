@@ -2,7 +2,7 @@
   "name": "MRL Workbench",
   "short_name": "MRL",
   "description": "Industrial Repair Logbook, PLC, Industrial Networks & Technical English OpenQuiz AI",
-  "start_url": "./index.html",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait-primary",

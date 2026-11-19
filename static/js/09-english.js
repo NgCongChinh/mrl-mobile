@@ -986,8 +986,7 @@ function decorateEnglishTermsInHtml(html) {
 function setAppLanguage(lang) {
   const target = lang === 'en' ? 'en' : 'vi';
   if (state.appLang === target) {
-    applyFullAppLocalization();
-    return;
+    return applyFullAppLocalization();
   }
   state.appLang = target;
   try { localStorage.setItem('mrl-app-lang', target); } catch (e) { /* ignore */ }
@@ -1000,8 +999,9 @@ function setAppLanguage(lang) {
   syncEnUiState();
   if (typeof renderStreakBadges === 'function') renderStreakBadges();
   if (typeof _syncAiKeyButtons === 'function') _syncAiKeyButtons();
-  applyFullAppLocalization();
+  const resPromise = applyFullAppLocalization();
   showToast(target === 'en' ? 'Switched to English (100% UI & Content)' : 'Đã chuyển sang Tiếng Việt', 'info');
+  return resPromise;
 }
 
 function _translateUiLeafNodes(rootEl, toEn) {
@@ -1336,9 +1336,9 @@ function applyFullAppLocalization() {
         el.innerHTML = el.dataset.viHtmlOrig;
       }
     });
-  } else {
-    translateVisibleRecordContentToEn();
+    return Promise.resolve();
   }
+  return translateVisibleRecordContentToEn();
 }
 
 // ---- Sync UI State & Mode Toggle ----
@@ -1382,6 +1382,15 @@ function toggleEnMode() {
   );
 }
 
+let _cachedEnVoices = [];
+if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+  const _refreshVoices = () => {
+    try { _cachedEnVoices = window.speechSynthesis.getVoices() || []; } catch (_) {}
+  };
+  _refreshVoices();
+  try { window.speechSynthesis.addEventListener?.('voiceschanged', _refreshVoices); } catch (_) {}
+}
+
 function speakEnglishText(text, rate = 0.94) {
   const clean = String(text || '')
     .replace(/[()[\]]/g, ' ')
@@ -1394,11 +1403,15 @@ function speakEnglishText(text, rate = 0.94) {
   }
   try {
     window.speechSynthesis.cancel();
+    if (window.speechSynthesis.paused) {
+      try { window.speechSynthesis.resume(); } catch (_) {}
+    }
     const utter = new SpeechSynthesisUtterance(clean);
-    const voices = window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [];
-    const enVoice = voices.find((v) => /^en-US/i.test(v.lang))
-      || voices.find((v) => /^en-GB/i.test(v.lang))
-      || voices.find((v) => /^en/i.test(v.lang));
+    const voices = (window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : []) || [];
+    const pool = voices.length ? voices : _cachedEnVoices;
+    const enVoice = pool.find((v) => /^en-US/i.test(v.lang))
+      || pool.find((v) => /^en-GB/i.test(v.lang))
+      || pool.find((v) => /^en/i.test(v.lang));
     if (enVoice) utter.voice = enVoice;
     utter.lang = enVoice?.lang || 'en-US';
     utter.rate = Math.max(0.5, Math.min(1.5, Number(rate) || 0.94));
@@ -1508,6 +1521,7 @@ function isEnPopupOpen() {
 function closeEnPopups() {
   document.getElementById('en-selection-popover')?.classList.add('hidden');
   document.getElementById('en-hover-tip')?.classList.add('hidden');
+  document.getElementById('en-mobile-sel-btn')?.classList.add('hidden');
 }
 
 function _positionFloatingBox(boxEl, anchorRect, preferAbove = false) {
@@ -1707,6 +1721,7 @@ function _showHoverTipForSpan(span) {
     <div class="en-tip-top">
       <span class="en-cat-badge">${escapeHtml(cat)}</span>
       <span class="en-tip-vi">${escapeHtml(topTerm)}</span>
+      <button type="button" class="ov-x" id="en-tip-close" title="Close" style="margin-left:auto;">×</button>
     </div>
     <div class="en-tip-en">${escapeHtml(mainTranslation)}</div>
     ${note ? `<div class="en-tip-note">${escapeHtml(note)}</div>` : ''}
@@ -1715,6 +1730,10 @@ function _showHoverTipForSpan(span) {
       <button type="button" class="btn btn-sm ${saved ? 'btn-green' : 'btn-primary'}" id="en-tip-save">${saved ? (state.appLang === 'en' ? '✓ Saved' : '✓ Đã lưu') : (state.appLang === 'en' ? '⭐ Save' : '⭐ Lưu từ vựng')}</button>
     </div>`;
 
+  tip.querySelector('#en-tip-close')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    tip.classList.add('hidden');
+  });
   tip.querySelector('#en-tip-speak')?.addEventListener('click', (e) => {
     e.stopPropagation();
     speakEnglishText(en);
@@ -2257,9 +2276,93 @@ document.addEventListener('mouseout', (e) => {
   }, 260);
 });
 
+document.addEventListener('click', (e) => {
+  if (!state.enMode && state.appLang !== 'en') return;
+  const hl = e.target?.closest?.('.en-term-hl');
+  if (hl) {
+    e.stopPropagation();
+    _showHoverTipForSpan(hl);
+  }
+});
+
+let _enMobileSelTimer = null;
+function _ensureMobileSelectionBtn() {
+  let btn = document.getElementById('en-mobile-sel-btn');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = 'en-mobile-sel-btn';
+    btn.className = 'en-mobile-sel-btn hidden';
+    btn.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const payload = btn._selPayload;
+      btn.classList.add('hidden');
+      if (payload) {
+        openSelectionTranslatorForText(payload.clean, payload.anchorRect, payload.sourceRef, 'auto');
+      }
+    });
+    document.body.appendChild(btn);
+  }
+  return btn;
+}
+
+function _getTouchSelectionPayload() {
+  const scopeSel = '.detail-pane, .fc-card, .portal-body, .scratchpad-wrap, #view-en-quiz, #view-en-coach, #view-en-reading, #view-en-ingest';
+  const active = document.activeElement;
+  if (active && (active.id === 'scratchpad-textarea' || active.id === 'pane2-scratchpad-textarea')) {
+    const st = active.selectionStart || 0;
+    const en = active.selectionEnd || 0;
+    if (en > st) {
+      const clean = String(active.value.slice(st, en) || '').replace(/\s+/g, ' ').trim();
+      if (clean.length >= 2 && clean.length <= 1200 && /[\p{L}\p{N}]/u.test(clean)) {
+        const r = active.getBoundingClientRect();
+        return {
+          clean,
+          sourceRef: 'MANUAL-SCRATCHPAD',
+          anchorRect: { left: r.left + 16, right: r.right - 16, top: Math.max(60, r.top + 40), bottom: Math.max(80, r.top + 60) },
+        };
+      }
+    }
+  }
+  const sel = window.getSelection ? window.getSelection() : null;
+  if (!sel || sel.isCollapsed) return null;
+  const clean = String(sel.toString() || '').replace(/\s+/g, ' ').trim();
+  if (clean.length < 2 || clean.length > 1500 || !/[\p{L}\p{N}]/u.test(clean)) return null;
+  const range = sel.rangeCount ? sel.getRangeAt(0) : null;
+  const anc = range?.commonAncestorContainer;
+  const ancEl = anc && (anc.nodeType === 1 ? anc : anc.parentElement);
+  if (!ancEl || !ancEl.closest?.(scopeSel)) return null;
+  const r = range.getBoundingClientRect();
+  const anchorRect = (r && (r.width > 0 || r.height > 0)) ? r : { left: 16, right: 320, top: 140, bottom: 160 };
+  return { clean, sourceRef: _activeRecordContextId(), anchorRect };
+}
+
+document.addEventListener('selectionchange', () => {
+  const isTouchLike = window.matchMedia?.('(max-width: 767px)').matches || ('ontouchstart' in window && window.innerWidth <= 900);
+  if (!isTouchLike) return;
+  clearTimeout(_enMobileSelTimer);
+  _enMobileSelTimer = setTimeout(() => {
+    const btn = document.getElementById('en-mobile-sel-btn');
+    if (!state.enMode && state.appLang !== 'en') {
+      if (btn) btn.classList.add('hidden');
+      return;
+    }
+    const payload = _getTouchSelectionPayload();
+    if (!payload) {
+      if (btn) btn.classList.add('hidden');
+      return;
+    }
+    const el = _ensureMobileSelectionBtn();
+    el._selPayload = payload;
+    el.textContent = state.appLang === 'en' ? '🇬🇧 Translate selection' : '🇬🇧 Dịch đoạn đang chọn';
+    el.classList.remove('hidden');
+  }, 350);
+});
+
 document.addEventListener('mousedown', (e) => {
   const pop = document.getElementById('en-selection-popover');
-  if (pop && !pop.classList.contains('hidden') && !e.target?.closest?.('#en-selection-popover, #ctx-menu')) {
+  if (pop && !pop.classList.contains('hidden') && !e.target?.closest?.('#en-selection-popover, #ctx-menu, #en-mobile-sel-btn')) {
     pop.classList.add('hidden');
   }
   const tip = document.getElementById('en-hover-tip');
@@ -2267,6 +2370,17 @@ document.addEventListener('mousedown', (e) => {
     tip.classList.add('hidden');
   }
 });
+
+document.addEventListener('touchstart', (e) => {
+  const pop = document.getElementById('en-selection-popover');
+  if (pop && !pop.classList.contains('hidden') && !e.target?.closest?.('#en-selection-popover, #ctx-menu, #en-mobile-sel-btn')) {
+    pop.classList.add('hidden');
+  }
+  const tip = document.getElementById('en-hover-tip');
+  if (tip && !tip.classList.contains('hidden') && !e.target?.closest?.('#en-hover-tip, .en-term-hl')) {
+    tip.classList.add('hidden');
+  }
+}, { passive: true });
 
 if (typeof MutationObserver !== 'undefined') {
   new MutationObserver((muts) => {

@@ -41,21 +41,30 @@
     const subEl = document.getElementById('mobile-subbar');
     const fabEl = document.getElementById('mobile-fab');
     const isEn = state.appLang === 'en';
+    const navLabels = isEn
+      ? { home: 'Home', repair: 'Repair', plc_net: 'PLC & Net', english: 'English', sync: 'Sync' }
+      : { home: 'Trang chủ', repair: 'Sửa mạch', plc_net: 'PLC & Mạng', english: 'Tiếng Anh', sync: 'Đồng bộ' };
 
     const grp = _activeBottomGroup();
     if (navEl) {
       navEl.querySelectorAll('.mob-nav-btn').forEach((btn) => {
-        btn.classList.toggle('active', btn.getAttribute('data-mob-tab') === grp);
+        const key = btn.getAttribute('data-mob-tab');
+        btn.classList.toggle('active', key === grp);
+        const lblEl = btn.querySelector('.mob-nav-lbl');
+        if (lblEl && navLabels[key]) lblEl.textContent = navLabels[key];
       });
     }
 
     if (!isMobileViewport()) return;
+
+    _updateDetailTopbar();
 
     // FAB visibility
     if (fabEl) {
       const FAB_TABS = ['repairs', 'knowledge', 'plc', 'network', 'en-vocab-bank'];
       const showFab = Boolean(state.activeWorkspace) && !_mobileSyncOpen && !_mobileDetail && FAB_TABS.includes(state.activeTab);
       fabEl.classList.toggle('hidden', !showFab);
+      fabEl.title = isEn ? 'Add new record' : 'Thêm nhanh bản ghi mới';
     }
 
     if (!subEl) return;
@@ -146,13 +155,27 @@
   }
 
   function _updateDetailTopbar() {
-    if (!_mobileDetail) return;
-    const rec = _getDetailRecord(_mobileDetail.kind, _mobileDetail.id);
     const idEl = document.getElementById('mob-detail-id');
     const stEl = document.getElementById('mob-detail-status');
     const backEl = document.getElementById('mob-back-btn');
+    const langBtn = document.getElementById('mob-detail-lang-btn');
     const isEn = state.appLang === 'en';
     if (backEl) backEl.textContent = isEn ? '← Back to list' : '← Quay lại danh sách';
+    if (langBtn) {
+      langBtn.textContent = isEn ? 'EN' : 'VI';
+      langBtn.classList.toggle('lang-en', isEn);
+      langBtn.title = isEn ? 'Switch to Vietnamese (VI)' : 'Chuyển sang Tiếng Anh (EN)';
+    }
+    if (stEl) {
+      const labels = isEn
+        ? { mastered: '🟢 Mastered', review: '🟡 Review', researching: '🔴 Researching', unclassified: '⚪ Unclassified' }
+        : { mastered: '🟢 Đã làm chủ', review: '🟡 Cần xem lại', researching: '🔴 Đang nghiên cứu', unclassified: '⚪ Chưa phân loại' };
+      Array.from(stEl.options).forEach((opt) => {
+        if (labels[opt.value]) opt.textContent = labels[opt.value];
+      });
+    }
+    if (!_mobileDetail) return;
+    const rec = _getDetailRecord(_mobileDetail.kind, _mobileDetail.id);
     if (idEl) {
       const titleHint = rec?.brand_model || rec?.topic_model || rec?.title || rec?.target_device || rec?.term || '';
       idEl.textContent = titleHint ? `${_mobileDetail.id} · ${titleHint}` : String(_mobileDetail.id);
@@ -163,6 +186,13 @@
       if (showStatus && rec) stEl.value = rec.status_code || 'review';
     }
   }
+
+  window.toggleMobileQuickLang = async function () {
+    const next = state.appLang === 'en' ? 'vi' : 'en';
+    if (typeof setAppLanguage === 'function') await setAppLanguage(next);
+    _syncMobileChrome();
+    if (_mobileSyncOpen) renderMobileSyncPanel();
+  };
 
   window.openMobileDetailOverlay = function (kind, id, pushHist = true) {
     if (!isMobileViewport()) return;
@@ -228,6 +258,48 @@
       wrapped._mobWrapped = true;
       window[fnName] = wrapped;
     });
+
+    // Wrap Cross-Ref jump functions so tapping a linked record opens slide-over detail on Mobile
+    [
+      ['jumpToRepairCase', 'repair'],
+      ['jumpToKnowledgeItem', 'knowledge'],
+      ['jumpToPlcNote', 'plc'],
+      ['jumpToNetworkNote', 'network'],
+    ].forEach(([fnName, kind]) => {
+      const orig = window[fnName];
+      if (typeof orig !== 'function' || orig._mobJumpWrapped) return;
+      const wrapped = function (id) {
+        const out = orig.apply(this, arguments);
+        if (isMobileViewport()) openMobileDetailOverlay(kind, id);
+        return out;
+      };
+      wrapped._mobJumpWrapped = true;
+      window[fnName] = wrapped;
+    });
+
+    // Wrap setAppLanguage & toggleEnMode so mobile chrome, detail bar & sync view update immediately
+    if (typeof window.setAppLanguage === 'function' && !window.setAppLanguage._mobLangWrapped) {
+      const origLang = window.setAppLanguage;
+      const wrappedLang = async function () {
+        const out = await origLang.apply(this, arguments);
+        _syncMobileChrome();
+        if (_mobileSyncOpen) renderMobileSyncPanel();
+        return out;
+      };
+      wrappedLang._mobLangWrapped = true;
+      window.setAppLanguage = wrappedLang;
+    }
+    if (typeof window.toggleEnMode === 'function' && !window.toggleEnMode._mobEnWrapped) {
+      const origToggle = window.toggleEnMode;
+      const wrappedToggle = function () {
+        const out = origToggle.apply(this, arguments);
+        _syncMobileChrome();
+        if (_mobileSyncOpen) renderMobileSyncPanel();
+        return out;
+      };
+      wrappedToggle._mobEnWrapped = true;
+      window.toggleEnMode = wrappedToggle;
+    }
 
     // Wrap openPortalScreen / enterWorkspace / switchTab so bottom nav & subbar always stay in sync
     ['openPortalScreen', 'enterWorkspace', 'switchTab'].forEach((fnName) => {
@@ -337,10 +409,12 @@
       ${_syncFormFieldsHtml('mob', syncCfg)}
 
       <div class="msync-card">
-        <div class="msync-card-title">🤖 ${isEn ? 'AI & INTERFACE PREFERENCES' : 'AI GEMINI & GIAO DIỆN'}</div>
+        <div class="msync-card-title">🤖 ${isEn ? 'AI, BILINGUAL STUDY & INTERFACE' : 'AI GEMINI, SONG NGỮ & GIAO DIỆN'}</div>
         <div class="mob-sync-grid-btns">
           <button type="button" class="btn" onclick="openAiConfigModal()">🔑 Gemini Key (${state.hasGeminiKey ? 'ON' : 'OFF'})</button>
-          <button type="button" class="btn" onclick="setAppLanguage('${state.appLang === 'en' ? 'vi' : 'en'}'); renderMobileSyncPanel();">🌐 ${state.appLang === 'en' ? 'Ngôn ngữ: EN → VI' : 'Ngôn ngữ: VI → EN'}</button>
+          <button type="button" class="btn" onclick="toggleMobileSyncLang()">🌐 ${state.appLang === 'en' ? 'Ngôn ngữ: EN → VI' : 'Ngôn ngữ: VI → EN'}</button>
+          <button type="button" class="btn ${state.enMode ? 'split-on' : ''}" onclick="toggleEnMode()">🇬🇧 ${isEn ? (state.enMode ? 'EN Study: ON' : 'EN Study: OFF') : (state.enMode ? 'Song ngữ: BẬT' : 'Song ngữ: TẮT')}</button>
+          <button type="button" class="btn" onclick="if(typeof openVocabModal==='function')openVocabModal()">⭐ ${isEn ? 'Vocab' : 'Sổ từ vựng'} (${(state.englishCards || []).length || (state.enVocabulary || []).length})</button>
           <button type="button" class="btn" onclick="document.querySelector('.theme-btn')?.click(); renderMobileSyncPanel();">◑ ${document.documentElement.dataset.theme === 'light' ? 'Dark Mode' : 'Light Mode'}</button>
           <button type="button" class="btn btn-indigo" onclick="MRLCoreStore.checkOtaUpdate()">🚀 OTA Update</button>
         </div>
@@ -356,6 +430,12 @@
           </label>
         </div>
       </div>`;
+  };
+
+  window.toggleMobileSyncLang = async function () {
+    const next = state.appLang === 'en' ? 'vi' : 'en';
+    if (typeof setAppLanguage === 'function') await setAppLanguage(next);
+    renderMobileSyncPanel();
   };
 
   window.onMobileBackupFilePick = async function (ev) {

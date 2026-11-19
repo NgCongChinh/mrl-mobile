@@ -900,7 +900,7 @@ function toggleCoachSpeechInput() {
     _coachRecognition = new SpeechRec();
     _coachRecognition.lang = 'en-US';
     _coachRecognition.interimResults = true;
-    _coachRecognition.continuous = true;
+    _coachRecognition.continuous = !window.matchMedia('(max-width: 767px)').matches;
     const ta = document.getElementById('en-coach-user-ta');
     const prefix = (ta?.value || '').trim();
     _coachRecognition.onresult = (event) => {
@@ -912,10 +912,16 @@ function toggleCoachSpeechInput() {
       if (ta) ta.value = nextVal;
       updateCoachKeywordLampsLive(nextVal);
     };
-    _coachRecognition.onerror = () => {
+    _coachRecognition.onerror = (ev) => {
       state.enCoach.recording = false;
       micBtn?.classList.remove('recording');
-      showToast(state.appLang === 'en' ? 'Microphone unavailable or blocked' : 'Không truy cập được Micro hoặc bị từ chối quyền', 'error');
+      const code = String(ev?.error || '');
+      const msg = code === 'not-allowed' || code === 'service-not-allowed'
+        ? (state.appLang === 'en' ? 'Microphone permission denied — allow Mic in browser settings' : 'Bị từ chối quyền Micro — hãy cấp quyền Micro trong cài đặt trình duyệt')
+        : (code === 'no-speech'
+          ? (state.appLang === 'en' ? 'No speech detected — tap Mic and speak clearly' : 'Không nghe thấy giọng nói — hãy bấm Mic và nói lại')
+          : (state.appLang === 'en' ? 'Microphone unavailable on this browser' : 'Không truy cập được Micro hoặc trình duyệt không hỗ trợ'));
+      showToast(msg, 'error');
     };
     _coachRecognition.onend = () => {
       state.enCoach.recording = false;

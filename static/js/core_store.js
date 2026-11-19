@@ -1,5 +1,5 @@
 /* ==========================================================================
-   MRL Shared Core Store, Transparent Offline Router, Two-Way Gist Sync & OTA
+   MRL Shared Core Store, Transparent Offline Router, Bilingual Engine & OTA
    - Shared between Desktop UI and Mobile Shell (1 Core - 2 UI Shells)
    - Runs 100% independently on IndexedDB/LocalStorage when PC is off
    ========================================================================== */
@@ -12,10 +12,10 @@
   const SEED_URL_CANDIDATES = ['./mrl_initial_seed.json', './static/mrl_initial_seed.json', '/mrl_initial_seed.json', '/static/mrl_initial_seed.json'];
   const SYNC_CFG_KEY = 'mrl-cloud-sync-cfg';
   const AI_CFG_KEY = 'mrl-ai-cfg';
+  const TRANS_CACHE_KEY = 'mrl-trans-cache-v1';
 
   let _mode = 'unknown'; // 'unknown' | 'online' | 'offline'
   let _snapshot = null;
-  let _initPromise = null;
   let _autoPushTimer = null;
   let _swReg = null;
   let _otaBannerShown = false;
@@ -27,6 +27,168 @@
     unclassified: '⚪ CHƯA PHÂN LOẠI',
   };
 
+  const DEFAULT_WORKSPACE_CATEGORIES = {
+    repair: [
+      { key: 'VFD', label: 'VFD' },
+      { key: 'Circuit_Board', label: 'BO MẠCH' },
+      { key: 'Screen', label: 'HMI / MÀN HÌNH' },
+      { key: 'Servo', label: 'SERVO' },
+      { key: 'PLC', label: 'PLC' },
+      { key: 'Sensors', label: 'CẢM BIẾN' },
+    ],
+    knowledge: [
+      { key: 'Knowledge', label: 'KIẾN THỨC ĐO & SỬA' },
+      { key: 'Automation', label: 'TỰ ĐỘNG HÓA' },
+      { key: 'Errors', label: 'MÃ LỖI NHANH' },
+    ],
+    plc: [
+      { key: 'Khối hàm (FB/FC/OB)', label: 'KHỐI HÀM FB/FC/OB' },
+      { key: 'Vùng nhớ (DB/UDT)', label: 'VÙNG NHỚ DB/UDT' },
+      { key: 'Analog & PID', label: 'ANALOG & PID' },
+      { key: 'Đấu nối & Bản vẽ', label: 'ĐẤU NỐI & BẢN VẼ' },
+    ],
+    network: [
+      { key: 'Modbus RTU/TCP', label: 'MODBUS RTU/TCP' },
+      { key: 'EtherCAT', label: 'ETHERCAT' },
+      { key: 'CANbus / CANopen', label: 'CANBUS / CANOPEN' },
+      { key: 'Profibus / Profinet', label: 'PROFIBUS / PROFINET' },
+      { key: 'USS / RS485', label: 'USS / RS485' },
+    ],
+    english: [
+      { key: 'Giao tiếp & Hội thoại', label: 'GIAO TIẾP & HỘI THOẠI' },
+      { key: 'Lexical Chunks (Cụm từ nối)', label: 'LEXICAL CHUNKS' },
+      { key: 'Biến tần & Phần cứng', label: 'BIẾN TẦN & PHẦN CỨNG' },
+      { key: 'PLC & Tự động hóa', label: 'PLC & TỰ ĐỘNG HÓA' },
+      { key: 'Mạng truyền thông', label: 'MẠNG TRUYỀN THÔNG' },
+    ],
+  };
+
+  const _OFFLINE_PHRASE_MAP = [
+    ['tự động kích hoạt ngay khoảnh khắc', 'automatically activates at the exact moment'],
+    ['lặp đi lặp lại vô hạn từ trên xuống dưới', 'repeats infinitely from top to bottom'],
+    ['mà không cần lưu trạng thái cũ', 'without needing to store previous state'],
+    ['chế độ điều khiển tự động', 'Automatic control mode'],
+    ['chế độ điều khiển bằng tay', 'Manual control mode'],
+    ['giữ thời gian lấy mẫu cố định tuyệt đối', 'keep the sampling time strictly constant'],
+    ['theo đúng chu kỳ cứng', 'on a strict fixed cyclic interval'],
+    ['nhằm giữ', 'to keep'],
+    ['tự động ngắt', 'automatically interrupts'],
+    ['tự động kích hoạt', 'automatically activates'],
+    ['báo lỗi lên màn hình', 'reports the fault on the HMI screen'],
+    ['không bị dừng', 'preventing a CPU STOP'],
+    ['giữ cho plc', 'keeps the PLC'],
+    ['đưa đầu vào', 'takes inputs'],
+    ['tính ra đầu ra', 'computes outputs'],
+    ['trong 1 vòng quét', 'within 1 scan cycle'],
+    ['lưu tạm tỉ lệ', 'temporarily stores the ratio'],
+    ['biến nháp', 'temporary variable'],
+    ['đổi ra', 'converts to'],
+    ['nơi chứa các', 'containing'],
+    ['chỉ dùng cho', 'used only for'],
+    ['dùng để chứa', 'used to store'],
+    ['dùng để', 'used to'],
+    ['chuyển từ stop sang run', 'transitions from STOP to RUN'],
+    ['chạy đúng 1 vòng quét duy nhất', 'executes for exactly one scan cycle'],
+    ['lặp đi lặp lại vô hạn', 'repeats continuously'],
+    ['từ trên xuống dưới', 'from top to bottom'],
+    ['lập trình cho hệ thống điều khiển', 'program a control system'],
+    ['với yêu cầu', 'with requirements'],
+    ['nhấn nút', 'press button'],
+    ['khoảng thời gian', 'time duration'],
+    ['công thức toán học', 'mathematical formulas'],
+    ['tín hiệu nguyên', 'raw integer signal'],
+    ['giải đo', 'measurement range'],
+    ['dải đo', 'measurement range'],
+    ['áp suất nước', 'water pressure'],
+    ['điều khiển pid', 'PID control'],
+    ['hiển thị lên màn hình', 'display on screen'],
+    ['tùy ý', 'freely / manually'],
+    ['khi cần thiết', 'when needed'],
+    ['bị đứt cáp', 'suffers a cable break'],
+    ['hoặc mất nguồn', 'or power loss'],
+    ['kiến thức cần hiểu', 'essential knowledge'],
+    ['bài tập thực hành', 'practice exercises'],
+    ['kiến thức cơ bản', 'fundamentals'],
+    ['kiến thức nâng cao', 'advanced topics'],
+    ['cần hiểu', 'needed to understand'],
+    ['bài tập', 'exercises'],
+    ['thực hành', 'practice'],
+    ['nâng cao', 'advanced'],
+    ['cơ bản', 'basics'],
+    ['chuyên sâu', 'deep dive'],
+    ['hiện tượng', 'symptom'],
+    ['nguyên nhân', 'root cause'],
+    ['cách xử lý', 'solution'],
+    ['kiểm tra', 'inspect / verify'],
+    ['thay thế', 'replace'],
+    ['chương trình plc', 'PLC program'],
+    ['bị lỗi', 'faulted'],
+    ['sau đó', 'then'],
+    ['trước khi', 'before'],
+    ['chờ', 'wait'],
+    ['ngừng', 'stop'],
+    ['đóng', 'close'],
+    ['mở', 'open'],
+    ['chạy', 'run'],
+    ['nhưng', 'however'],
+    ['hoặc', 'or'],
+    ['và', 'and'],
+    ['như', 'such as'],
+    ['một', 'a'],
+    ['các', ''],
+    ['những', ''],
+    ['này', 'this'],
+    ['giúp', 'helps'],
+    ['để', 'to'],
+    ['khi', 'when'],
+    ['nếu', 'if'],
+    ['từ', 'from'],
+    ['sang', 'to'],
+    ['theo', 'by'],
+    ['về', 'about'],
+    ['trên', 'on'],
+    ['dưới', 'below'],
+    ['lên', 'to'],
+    ['vào', 'into'],
+    ['ra', 'out'],
+    ['của', 'of'],
+    ['là', 'is'],
+    ['có', 'has'],
+  ];
+
+  // -------------------------------------------------------------------------
+  // URL / Asset Path Resolver (Static GitHub Pages subpath safe)
+  // -------------------------------------------------------------------------
+  function _isStaticHostedContext() {
+    if (_mode === 'offline') return true;
+    if (typeof document !== 'undefined' && document.querySelector('meta[name="mrl-build"]')) return true;
+    if (typeof location !== 'undefined') {
+      const segs = location.pathname.split('/').filter(Boolean);
+      if (segs.length > 0 && !location.port) return true;
+    }
+    return false;
+  }
+
+  function resolveAssetUrl(rawUrl) {
+    const s = String(rawUrl || '').trim();
+    if (!s) return '';
+    if (
+      s.startsWith('data:') ||
+      s.startsWith('blob:') ||
+      s.startsWith('http://') ||
+      s.startsWith('https://') ||
+      s.startsWith('./') ||
+      s.startsWith('../')
+    ) {
+      return s;
+    }
+    if ((s.startsWith('/uploads/') || s.startsWith('/static/')) && _isStaticHostedContext()) {
+      return `.${s}`;
+    }
+    return s;
+  }
+  window.resolveAssetUrl = resolveAssetUrl;
+
   function utcNowIso() {
     return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   }
@@ -36,6 +198,16 @@
     const m = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     return `${y}-${m}-${day}`;
+  }
+
+  function localDateTimeStr(d = new Date()) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    return `${y}-${m}-${day} ${hh}:${mm}:${ss}`;
   }
 
   function ensureIsoTs(val) {
@@ -49,7 +221,13 @@
   }
 
   function parseTs(val) {
-    const iso = ensureIsoTs(val);
+    if (!val) return 0;
+    const raw = String(val).trim();
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)) {
+      const msLocal = Date.parse(raw.replace(' ', 'T'));
+      if (!Number.isNaN(msLocal)) return msLocal;
+    }
+    const iso = ensureIsoTs(raw);
     if (!iso) return 0;
     const ms = Date.parse(iso);
     return Number.isNaN(ms) ? 0 : ms;
@@ -134,7 +312,7 @@
       const st = c.srs_stage || 'new';
       counts[st] = (counts[st] || 0) + 1;
       const nxtMs = parseTs(c.next_review_at);
-      const isDue = st === 'new' || st === 'learning' || !nxtMs || nxtMs <= nowMs;
+      const isDue = st === 'learning' || (st === 'review' && (!nxtMs || nxtMs <= nowMs));
       c.is_due = isDue;
       if (isDue) counts.due_now += 1;
     });
@@ -244,31 +422,29 @@
     snap.srs_counts = _computeSrsCounts(snap.english_cards || []);
     snap.english_streak = _computeStreakSummary(snap.english_streak_logs || []);
 
-    // Mirror english_cards -> english_vocab & en_vocabulary for compatibility
     const cards = snap.english_cards || [];
-    if (cards.length) {
-      snap.english_vocab = cards.map((c, i) => ({
-        id: c.id || `EV-${i + 1}`,
-        term_or_chunk: c.term,
-        pronunciation: c.ipa || '',
-        category: c.category || 'PLC & Tự động hóa',
-        meaning_vi: c.meaning_vi || '',
-        example_en: c.example_en || '',
-        example_vi: c.example_vi || '',
-        source_ref: c.linked_record_id || '',
-        status_code: c.srs_stage === 'mastered' ? 'mastered' : (c.srs_stage === 'new' ? 'researching' : 'review'),
-      }));
-      snap.en_vocabulary = cards.map((c, i) => ({
-        id: i + 1,
-        vi_term: c.meaning_vi || '',
-        en_term: c.term || '',
-        category: c.category || 'TECH',
-        example_vi: c.example_vi || '',
-        example_en: c.example_en || '',
-        source_ref: c.linked_record_id || '',
-        rating: c.srs_stage === 'mastered' ? 'mastered' : (c.srs_stage === 'new' ? 'researching' : 'review'),
-      }));
-    }
+    snap.english_vocab = cards.map((c, i) => ({
+      id: c.id || `EV-${i + 1}`,
+      term_or_chunk: c.term,
+      pronunciation: c.ipa || '',
+      category: c.category || 'PLC & Tự động hóa',
+      meaning_vi: c.meaning_vi || '',
+      example_en: c.example_en || '',
+      example_vi: c.example_vi || '',
+      source_ref: c.linked_record_id || '',
+      status_code: c.srs_stage === 'mastered' ? 'mastered' : (c.srs_stage === 'new' ? 'researching' : 'review'),
+    }));
+    snap.en_vocabulary = cards.map((c, i) => ({
+      id: i + 1,
+      card_id: c.id,
+      vi_term: c.meaning_vi || '',
+      en_term: c.term || '',
+      category: c.category || 'TECH',
+      example_vi: c.example_vi || '',
+      example_en: c.example_en || '',
+      source_ref: c.linked_record_id || '',
+      rating: c.srs_stage === 'mastered' ? 'mastered' : (c.srs_stage === 'new' ? 'researching' : 'review'),
+    }));
     return snap;
   }
 
@@ -321,8 +497,25 @@
       review_progress: {},
       workspace_categories: {},
       en_glossary: [],
+      translation_cache: { vi2en: {}, en2vi: {} },
       tombstones: {},
     };
+  }
+
+  function _mergeTranslationMaps(target, incoming) {
+    const out = {
+      vi2en: { ...(target?.vi2en || {}) },
+      en2vi: { ...(target?.en2vi || {}) },
+    };
+    if (incoming && typeof incoming === 'object') {
+      Object.entries(incoming.vi2en || {}).forEach(([k, v]) => {
+        if (k && v && !out.vi2en[k]) out.vi2en[k] = v;
+      });
+      Object.entries(incoming.en2vi || {}).forEach(([k, v]) => {
+        if (k && v && !out.en2vi[k]) out.en2vi[k] = v;
+      });
+    }
+    return out;
   }
 
   async function ensureLocalSnapshot() {
@@ -333,7 +526,21 @@
       _refreshDerivedFields(stored);
       await _idbSet('snapshot', stored);
     } else {
-      _refreshDerivedFields(stored);
+      const needGlossary = !Array.isArray(stored.en_glossary) || stored.en_glossary.length === 0;
+      const needTrans = !stored.translation_cache || Object.keys(stored.translation_cache.vi2en || {}).length === 0;
+      if (needGlossary || needTrans) {
+        const seed = await _fetchInitialSeed();
+        if (needGlossary && Array.isArray(seed.en_glossary) && seed.en_glossary.length) {
+          stored.en_glossary = seed.en_glossary;
+        }
+        if (seed.translation_cache) {
+          stored.translation_cache = _mergeTranslationMaps(stored.translation_cache, seed.translation_cache);
+        }
+        _refreshDerivedFields(stored);
+        await _idbSet('snapshot', stored);
+      } else {
+        _refreshDerivedFields(stored);
+      }
     }
     _snapshot = stored;
     return _snapshot;
@@ -363,7 +570,7 @@
         }
         const img = new Image();
         img.onload = () => {
-          const maxDim = 1080;
+          const maxDim = 1280;
           let w = img.naturalWidth || img.width || 800;
           let h = img.naturalHeight || img.height || 600;
           if (w > maxDim || h > maxDim) {
@@ -413,6 +620,7 @@
     const cfg = getAiConfig();
     const key = (cfg.gemini_api_key || '').trim();
     if (!key) return null;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return null;
     const model = cfg.gemini_model || 'gemini-2.0-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
     try {
@@ -432,6 +640,323 @@
     } catch (_) {
       return null;
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Offline / Hybrid Technical Translation Engine (parity with backend)
+  // -------------------------------------------------------------------------
+  function _getLocalTransCache() {
+    try {
+      const raw = localStorage.getItem(TRANS_CACHE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return { vi2en: parsed.vi2en || {}, en2vi: parsed.en2vi || {} };
+      }
+    } catch (_) {}
+    return { vi2en: {}, en2vi: {} };
+  }
+
+  function _saveLocalTransCache(dirKey, srcText, dstText) {
+    if (!srcText || !dstText) return;
+    try {
+      const cur = _getLocalTransCache();
+      cur[dirKey] = cur[dirKey] || {};
+      cur[dirKey][srcText] = dstText;
+      const keys = Object.keys(cur[dirKey]);
+      if (keys.length > 600) {
+        keys.slice(0, keys.length - 500).forEach((k) => { delete cur[dirKey][k]; });
+      }
+      localStorage.setItem(TRANS_CACHE_KEY, JSON.stringify(cur));
+    } catch (_) {}
+  }
+
+  function _detectTextLang(text) {
+    const clean = String(text || '').trim();
+    if (!clean) return 'vi';
+    if (/[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(clean)) return 'vi';
+    if (/\b(khong|duoc|chay|mach|nguon|vong|quet|cam|bien|thanh|ghi)\b/i.test(clean)) return 'vi';
+    return 'en';
+  }
+
+  function _enVariants(enRaw) {
+    const out = [];
+    const raw = String(enRaw || '').trim();
+    if (raw) out.push(raw);
+    const noParen = raw.replace(/\s*[\(\[].*?[\)\]]/g, '').trim();
+    if (noParen && noParen.length >= 4 && !out.includes(noParen)) out.push(noParen);
+    const noDash = noParen.split(/\s*[—–]\s*/)[0].trim();
+    if (noDash && noDash.length >= 4 && !out.includes(noDash)) out.push(noDash);
+    noDash.split(/\s*\/\s*/).forEach((part) => {
+      const p = part.trim();
+      if (p && p.length >= 6 && !out.includes(p)) out.push(p);
+    });
+    return out;
+  }
+
+  function _combinedGlossary(snap) {
+    const seen = new Set();
+    const items = [];
+    (snap.english_cards || []).forEach((c) => {
+      const vi = String(c.meaning_vi || '').trim();
+      const en = String(c.term || '').trim();
+      if (vi && en && !seen.has(vi.toLowerCase())) {
+        seen.add(vi.toLowerCase());
+        items.push({ vi, en, category: c.category || 'VOCAB', note: c.example_en || '' });
+      }
+    });
+    (snap.en_glossary || []).forEach((g) => {
+      const vi = String(g.vi || '').trim();
+      const en = String(g.en || '').trim();
+      if (vi && en && !seen.has(vi.toLowerCase())) {
+        seen.add(vi.toLowerCase());
+        items.push({ vi, en, category: g.category || 'TECH', note: g.note || '' });
+      }
+    });
+    items.sort((a, b) => b.vi.length - a.vi.length);
+    return items;
+  }
+
+  function _escapeRx(str) {
+    return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function _extractMatchingTerms(text, snap) {
+    const clean = String(text || '').trim();
+    if (!clean) return [];
+    const lower = clean.toLowerCase();
+    const glossary = _combinedGlossary(snap);
+    const candidates = [];
+    glossary.forEach((item) => {
+      candidates.push([item.vi, item]);
+      _enVariants(item.en).forEach((ev) => candidates.push([ev, item]));
+    });
+    candidates.sort((a, b) => b[0].length - a[0].length);
+
+    const terms = [];
+    const usedSpans = [];
+    const seenPairs = new Set();
+    for (const [phrase, item] of candidates) {
+      const pLow = String(phrase || '').toLowerCase();
+      if (pLow.length < 4) continue;
+      const rx = new RegExp(`(?<!\\w)${_escapeRx(pLow)}(?!\\w)`, 'i');
+      const m = rx.exec(lower);
+      if (!m) continue;
+      const start = m.index;
+      const end = start + m[0].length;
+      if (usedSpans.some(([s, e]) => !(end <= s || start >= e))) continue;
+      const pk = `${item.vi.toLowerCase()}|${item.en.toLowerCase()}`;
+      if (seenPairs.has(pk)) continue;
+      seenPairs.add(pk);
+      usedSpans.push([start, end]);
+      terms.push({
+        vi: item.vi,
+        vi_canon: item.vi,
+        en: item.en,
+        category: item.category || 'TECH',
+        note: item.note || '',
+      });
+      if (terms.length >= 12) break;
+    }
+    return terms;
+  }
+
+  function _lookupCachedTranslation(clean, sl, tl, snap) {
+    const dirKey = `${sl}2${tl}`;
+    const snapMap = (snap.translation_cache && snap.translation_cache[dirKey]) || {};
+    const localMap = _getLocalTransCache()[dirKey] || {};
+    const low = clean.toLowerCase();
+
+    if (localMap[clean]) return localMap[clean];
+    if (snapMap[clean]) return snapMap[clean];
+
+    for (const m of [localMap, snapMap]) {
+      for (const [k, v] of Object.entries(m)) {
+        if (k.toLowerCase() === low && v) return v;
+      }
+    }
+    return '';
+  }
+
+  function _offlineTechnicalTranslate(text, snap, sl, tl) {
+    const clean = String(text || '').trim();
+    if (!clean) return '';
+    const glossary = _combinedGlossary(snap);
+    if (tl === 'en') {
+      let out = clean;
+      const reps = [...glossary.map((g) => [g.vi, g.en]), ..._OFFLINE_PHRASE_MAP].sort((a, b) => b[0].length - a[0].length);
+      reps.forEach(([viP, enP]) => {
+        if (!viP) return;
+        const rx = new RegExp(`(?<![\\p{L}\\p{N}_])${_escapeRx(viP)}(?![\\p{L}\\p{N}_])`, 'giu');
+        out = out.replace(rx, enP ? ` ${enP} ` : ' ');
+      });
+      out = out.replace(/\s+/g, ' ').replace(/\s+([.,;:!?])/g, '$1').trim();
+      return out ? out.charAt(0).toUpperCase() + out.slice(1) : clean;
+    }
+    let outVi = clean;
+    const enReps = glossary.slice().sort((a, b) => b.en.length - a.en.length);
+    enReps.forEach((g) => {
+      _enVariants(g.en).forEach((ev) => {
+        if (ev.length < 4) return;
+        const rx = new RegExp(`(?<!\\w)${_escapeRx(ev)}(?!\\w)`, 'gi');
+        outVi = outVi.replace(rx, g.vi);
+      });
+    });
+    return outVi.replace(/\s+/g, ' ').trim();
+  }
+
+  async function _tryPublicCorsTranslate(clean, sl, tl) {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return '';
+    if (!clean || clean.length > 420) return '';
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), 2400) : null;
+    try {
+      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(clean)}&langpair=${encodeURIComponent(`${sl}|${tl}`)}`;
+      const res = await _nativeFetch(url, { signal: ctrl ? ctrl.signal : undefined });
+      if (timer) clearTimeout(timer);
+      if (!res.ok) return '';
+      const data = await res.json();
+      const tr = String(data?.responseData?.translatedText || '').trim();
+      if (!tr || tr.toUpperCase().includes('MYMEMORY WARNING') || tr.toLowerCase() === clean.toLowerCase()) return '';
+      return tr;
+    } catch (_) {
+      if (timer) clearTimeout(timer);
+      return '';
+    }
+  }
+
+  function _resolveTranslateLangPair(clean, sourceLang, targetLang) {
+    let sl = String(sourceLang || 'auto').toLowerCase().trim();
+    let tl = String(targetLang || 'auto').toLowerCase().trim();
+    if (tl === 'vi' || tl === 'en') {
+      if ((sl !== 'vi' && sl !== 'en') || sl === tl) sl = tl === 'vi' ? 'en' : 'vi';
+    } else {
+      if (sl !== 'vi' && sl !== 'en') sl = _detectTextLang(clean);
+      tl = sl === 'vi' ? 'en' : 'vi';
+    }
+    return [sl, tl];
+  }
+
+  function _formatTranslateResult(clean, sl, tl, outTxt, terms, cached) {
+    return {
+      vi: sl === 'vi' ? clean : outTxt,
+      en: tl === 'en' ? outTxt : clean,
+      source_lang: sl,
+      target_lang: tl,
+      source_text: clean,
+      translated_text: outTxt,
+      terms,
+      cached: Boolean(cached),
+    };
+  }
+
+  function _tryFastTranslateMatch(clean, sl, tl, snap, terms) {
+    const glossary = _combinedGlossary(snap);
+    const low = clean.toLowerCase();
+    if (sl === 'vi' && tl === 'en') {
+      for (const item of glossary) {
+        if (item.vi.toLowerCase() === low) {
+          return _formatTranslateResult(clean, sl, tl, item.en, terms, true);
+        }
+      }
+    } else if (sl === 'en' && tl === 'vi') {
+      for (const item of glossary) {
+        if (_enVariants(item.en).some((ev) => ev.toLowerCase() === low)) {
+          return _formatTranslateResult(clean, sl, tl, item.vi, terms, true);
+        }
+      }
+    }
+    const cachedHit = _lookupCachedTranslation(clean, sl, tl, snap);
+    if (cachedHit) {
+      return _formatTranslateResult(clean, sl, tl, cachedHit, terms, true);
+    }
+    return null;
+  }
+
+  async function _translateSingleOfflineOrHybrid(rawText, sourceLang, targetLang, snap) {
+    const clean = String(rawText || '').trim();
+    if (!clean) {
+      return { vi: '', en: '', source_lang: 'vi', target_lang: 'en', source_text: '', translated_text: '', terms: [], cached: false };
+    }
+    const [sl, tl] = _resolveTranslateLangPair(clean, sourceLang, targetLang);
+    const terms = _extractMatchingTerms(clean, snap);
+
+    const fast = _tryFastTranslateMatch(clean, sl, tl, snap, terms);
+    if (fast) return fast;
+
+    let outTxt = '';
+    const geminiOut = await _callGeminiJsonDirect(
+      `Translate the following industrial automation / electronics engineering text from ${sl === 'vi' ? 'Vietnamese' : 'English'} to ${tl === 'en' ? 'Technical English' : 'Vietnamese'}.\nPreserve part numbers, fault codes, PLC blocks (OB1, DB1, FB, FC), and hex/register addresses.\nText: "${clean}"\nReturn JSON ONLY: {"translated": "<translation>"}`
+    );
+    if (geminiOut && typeof geminiOut.translated === 'string' && geminiOut.translated.trim()) {
+      outTxt = geminiOut.translated.trim();
+    } else {
+      outTxt = await _tryPublicCorsTranslate(clean, sl, tl);
+    }
+
+    if (!outTxt) {
+      outTxt = _offlineTechnicalTranslate(clean, snap, sl, tl);
+    }
+    if (outTxt) {
+      _saveLocalTransCache(`${sl}2${tl}`, clean, outTxt);
+    }
+    return _formatTranslateResult(clean, sl, tl, outTxt || clean, terms, false);
+  }
+
+  async function _translateBatchOfflineOrHybrid(texts, sourceLang, targetLang, snap) {
+    const list = (Array.isArray(texts) ? texts : []).slice(0, 120);
+    const items = new Array(list.length);
+    const misses = [];
+
+    list.forEach((rawTxt, idx) => {
+      const clean = String(rawTxt || '').trim();
+      if (!clean) {
+        items[idx] = { vi: '', en: '', source_lang: 'vi', target_lang: 'en', source_text: '', translated_text: '', terms: [], cached: false };
+        return;
+      }
+      const [sl, tl] = _resolveTranslateLangPair(clean, sourceLang, targetLang);
+      const terms = _extractMatchingTerms(clean, snap);
+      const fast = _tryFastTranslateMatch(clean, sl, tl, snap, terms);
+      if (fast) {
+        items[idx] = fast;
+      } else {
+        misses.push({ idx, clean, sl, tl, terms });
+      }
+    });
+
+    if (misses.length && getAiConfig().gemini_api_key) {
+      for (let i = 0; i < misses.length; i += 35) {
+        const chunk = misses.slice(i, i + 35);
+        const promptList = chunk.map((m, k) => `${k}: ${m.clean}`).join('\n');
+        const dirLabel = chunk[0].tl === 'en' ? 'Vietnamese to Technical English' : 'Technical English to Vietnamese';
+        const aiArr = await _callGeminiJsonDirect(
+          `Translate each numbered industrial engineering line from ${dirLabel}. Preserve technical symbols, fault codes, and PLC block names.\nLines:\n${promptList}\nReturn ONLY a JSON array of translated strings in the exact same order.`
+        );
+        if (Array.isArray(aiArr) && aiArr.length === chunk.length) {
+          chunk.forEach((m, k) => {
+            const tr = String(aiArr[k] || '').trim();
+            if (tr) {
+              _saveLocalTransCache(`${m.sl}2${m.tl}`, m.clean, tr);
+              items[m.idx] = _formatTranslateResult(m.clean, m.sl, m.tl, tr, m.terms, false);
+            }
+          });
+        }
+      }
+    }
+
+    for (const m of misses) {
+      if (items[m.idx]) continue;
+      let outTxt = '';
+      if (misses.length <= 12) {
+        outTxt = await _tryPublicCorsTranslate(m.clean, m.sl, m.tl);
+      }
+      if (!outTxt) {
+        outTxt = _offlineTechnicalTranslate(m.clean, snap, m.sl, m.tl);
+      }
+      if (outTxt) _saveLocalTransCache(`${m.sl}2${m.tl}`, m.clean, outTxt);
+      items[m.idx] = _formatTranslateResult(m.clean, m.sl, m.tl, outTxt || m.clean, m.terms, false);
+    }
+
+    return { items };
   }
 
   // -------------------------------------------------------------------------
@@ -465,6 +990,26 @@
     row.updated_at = utcNowIso();
   }
 
+  function _normalizeEnCat(raw, term = '') {
+    const c = String(raw || '').trim();
+    if ([
+      'Giao tiếp & Hội thoại',
+      'Lexical Chunks (Cụm từ nối)',
+      'Biến tần & Phần cứng',
+      'PLC & Tự động hóa',
+      'Mạng truyền thông',
+      'Giao tiếp Phỏng vấn',
+    ].includes(c)) return c;
+    const low = `${c} ${term}`.toLowerCase();
+    if (/plc|ob\d|db\d|ladder|scl|scan cycle|hmi|tia|pid/.test(low)) return 'PLC & Tự động hóa';
+    if (/modbus|profinet|profibus|ethercat|canopen|rs485|tcp|ip|terminating/.test(low)) return 'Mạng truyền thông';
+    if (/interview|phỏng vấn|explain|describe|diagnos|troubleshoot/.test(low)) return 'Giao tiếp Phỏng vấn';
+    if (/chunk|according to|in order to|prior to|make sure|when power/.test(low) || String(term).split(/\s+/).length >= 4) {
+      return 'Lexical Chunks (Cụm từ nối)';
+    }
+    return 'Biến tần & Phần cứng';
+  }
+
   async function _parseBody(init) {
     if (!init || !init.body) return {};
     if (typeof FormData !== 'undefined' && init.body instanceof FormData) return init.body;
@@ -492,6 +1037,8 @@
         lan_ip: location.hostname || 'offline',
         port: location.port || '',
         lan_url: location.origin,
+        lan_reachable: false,
+        bind_host: '',
         qr_svg: '',
         cloud_sync: {
           has_token: Boolean(cfg.github_token),
@@ -500,6 +1047,7 @@
           last_sync_at: cfg.last_sync_at || '',
           last_sync_status: cfg.last_sync_status || '',
         },
+        gh_pages: {},
         mobile_dist: null,
       });
     }
@@ -758,7 +1306,7 @@
       }
     }
 
-    // ---- Attachments & Camera Capture (compressed DataURL) ----
+    // ---- Attachments & Camera Capture (compressed DataURL 1280px) ----
     if (p === '/api/attachments/upload' && m === 'POST' && body instanceof FormData) {
       const file = body.get('file');
       const parentType = String(body.get('parent_type') || 'repair');
@@ -851,6 +1399,15 @@
         return _jsonResponse({ reset: true });
       }
     }
+    match = p.match(/^\/api\/workspace-categories\/([^/]+)\/reset$/);
+    if (match && m === 'POST') {
+      const sc = decodeURIComponent(match[1]);
+      const defItems = (DEFAULT_WORKSPACE_CATEGORIES[sc] || []).map((it) => ({ ...it }));
+      snap.workspace_categories = snap.workspace_categories || {};
+      snap.workspace_categories[sc] = defItems;
+      await saveLocalSnapshot(snap);
+      return _jsonResponse({ ..._bootstrapPayloadFromSnap(snap), scope: sc, items: defItems });
+    }
     match = p.match(/^\/api\/workspace-categories\/([^/]+)$/);
     if (match && m === 'PUT') {
       const sc = decodeURIComponent(match[1]);
@@ -860,7 +1417,7 @@
         label: it.label || it.key,
       }));
       await saveLocalSnapshot(snap);
-      return _jsonResponse({ scope: sc, items: snap.workspace_categories[sc], workspace_categories: snap.workspace_categories });
+      return _jsonResponse({ ..._bootstrapPayloadFromSnap(snap), scope: sc, items: snap.workspace_categories[sc] });
     }
     match = p.match(/^\/api\/records\/([^/]+)\/([^/]+)\/category$/);
     if (match && m === 'PATCH') {
@@ -879,12 +1436,77 @@
     }
     match = p.match(/^\/api\/cross-reference\/(.+)$/);
     if (match && m === 'GET') {
-      const clean = decodeURIComponent(match[1]).toUpperCase();
+      const clean = decodeURIComponent(match[1]).trim();
+      const low = clean.toLowerCase();
+      const hasTag = (arr) => (arr || []).some((t) => String(t || '').trim().toLowerCase() === low);
       return _jsonResponse({
         tag: clean,
-        repair_cases: (snap.repair_cases || []).filter((r) => (r.component_tags || []).includes(clean) || (r.fault_codes || []).includes(clean)),
-        knowledge_items: (snap.knowledge_items || []).filter((k) => (k.component_tags || []).includes(clean)),
+        repair_cases: (snap.repair_cases || []).filter((r) => hasTag(r.component_tags) || hasTag(r.fault_codes)),
+        knowledge_items: (snap.knowledge_items || []).filter((k) => hasTag(k.component_tags)),
+        plc_notes: (snap.plc_notes || []).filter((n) => hasTag(n.tags)),
+        network_notes: (snap.network_notes || []).filter((n) => hasTag(n.tags)),
       });
+    }
+
+    // ---- Legacy Quick Vocab Modal (/api/en/vocabulary) ----
+    if (p === '/api/en/vocabulary' && m === 'POST') {
+      const viTerm = String(body.vi_term || '').trim();
+      const enTerm = String(body.en_term || '').trim();
+      if (!viTerm || !enTerm) return _jsonResponse({ detail: 'Missing vi_term or en_term' }, 400);
+      snap.english_cards = snap.english_cards || [];
+      let card = snap.english_cards.find((c) => String(c.term || '').trim().toLowerCase() === enTerm.toLowerCase());
+      if (card) {
+        card.meaning_vi = viTerm;
+        if (body.example_en) card.example_en = body.example_en;
+        if (body.example_vi) card.example_vi = body.example_vi;
+        if (body.source_ref) card.linked_record_id = body.source_ref;
+        card.updated_at = utcNowIso();
+      } else {
+        const cid = _nextSeqId(snap.english_cards, 'ENG');
+        card = {
+          id: cid,
+          term: enTerm,
+          ipa: '/.../',
+          word_class: enTerm.split(/\s+/).length >= 4 ? 'Lexical Chunk' : 'Noun',
+          category: _normalizeEnCat(body.category || '', enTerm),
+          meaning_vi: viTerm,
+          collocations: '',
+          example_en: body.example_en || '',
+          example_vi: body.example_vi || '',
+          linked_record_id: body.source_ref || '',
+          srs_stage: 'new',
+          interval_days: 0,
+          ease_factor: 2.5,
+          repetitions: 0,
+          next_review_at: '',
+          last_reviewed_at: '',
+          created_at: utcNowIso(),
+          updated_at: utcNowIso(),
+        };
+        delete snap.tombstones[`english_card:${cid}`];
+        snap.english_cards.unshift(card);
+      }
+      await saveLocalSnapshot(snap);
+      const item = (snap.english_vocab || []).find((v) => String(v.term_or_chunk || '').toLowerCase() === enTerm.toLowerCase()) || card;
+      return _jsonResponse({ item, ..._bootstrapPayloadFromSnap(snap) }, 201);
+    }
+    match = p.match(/^\/api\/en\/vocabulary\/([^/]+)$/);
+    if (match && m === 'DELETE') {
+      const rawId = decodeURIComponent(match[1]);
+      snap.english_cards = snap.english_cards || [];
+      let idx = -1;
+      const num = Number(rawId);
+      if (!Number.isNaN(num) && Number.isInteger(num) && num >= 1 && num <= snap.english_cards.length) {
+        idx = num - 1;
+      } else {
+        idx = snap.english_cards.findIndex((c) => String(c.id) === rawId);
+      }
+      if (idx >= 0) {
+        const removed = snap.english_cards.splice(idx, 1)[0];
+        if (removed?.id) snap.tombstones[`english_card:${removed.id}`] = utcNowIso();
+        await saveLocalSnapshot(snap);
+      }
+      return _jsonResponse({ deleted: true, ..._bootstrapPayloadFromSnap(snap) });
     }
 
     // ---- English SRS Cards, Review, Combat & AI Config (100% Independent Offline) ----
@@ -959,8 +1581,8 @@
       card.interval_days = ivl;
       card.ease_factor = ef;
       card.repetitions = reps;
-      card.last_reviewed_at = utcNowIso();
-      card.next_review_at = nextDate.toISOString().replace(/\.\d{3}Z$/, 'Z');
+      card.last_reviewed_at = localDateTimeStr(now);
+      card.next_review_at = localDateTimeStr(nextDate);
       card.updated_at = utcNowIso();
       _recordStreakHit(snap, 1, 0, xp);
       await saveLocalSnapshot(snap);
@@ -996,6 +1618,7 @@
       const ids = body.card_ids || [];
       const ratio = body.total > 0 ? body.score / body.total : 1;
       const synced = [];
+      const now = new Date();
       ids.slice(0, 10).forEach((cid) => {
         const c = (snap.english_cards || []).find((x) => x.id === cid);
         if (!c) return;
@@ -1004,15 +1627,16 @@
         if (ratio >= 0.66) {
           ivl = ivl <= 0 ? 1 : Math.max(2, Math.round(ivl * 1.6));
           c.srs_stage = ivl >= 21 ? 'mastered' : (ivl <= 1 ? 'learning' : 'review');
-          const d = new Date(); d.setDate(d.getDate() + ivl);
-          c.next_review_at = d.toISOString().replace(/\.\d{3}Z$/, 'Z');
+          const d = new Date(now);
+          d.setDate(d.getDate() + ivl);
+          c.next_review_at = localDateTimeStr(d);
         } else {
           ivl = Math.min(ivl, 1);
           c.srs_stage = 'learning';
-          c.next_review_at = utcNowIso();
+          c.next_review_at = localDateTimeStr(now);
         }
         c.interval_days = ivl;
-        c.last_reviewed_at = utcNowIso();
+        c.last_reviewed_at = localDateTimeStr(now);
         c.updated_at = utcNowIso();
         synced.push({ id: c.id, term: c.term, srs_stage: c.srs_stage, interval_days: ivl });
       });
@@ -1020,7 +1644,7 @@
       await saveLocalSnapshot(snap);
       return _jsonResponse({ synced, ..._bootstrapPayloadFromSnap(snap) });
     }
-    if (p === '/api/english/evaluate-combat' && m === 'POST') {
+    if ((p === '/api/english/evaluate-combat' || p === '/api/english/evaluate-translation') && m === 'POST') {
       const kws = body.target_keywords || [];
       const userLow = String(body.user_en || '').toLowerCase();
       const matched = [];
@@ -1039,13 +1663,24 @@
         drill.attempts = Number(drill.attempts || 0) + 1;
         drill.updated_at = utcNowIso();
       }
+      const relatedTerms = _extractMatchingTerms(`${body.prompt_vi || ''} ${body.reference_en || ''}`, snap).slice(0, 6);
+      const coreVocab = relatedTerms.map((t) => {
+        const hitCard = (snap.english_cards || []).find((c) => String(c.term || '').toLowerCase() === t.en.toLowerCase());
+        return {
+          term: t.en,
+          meaning_vi: t.vi,
+          ipa: hitCard?.ipa || '',
+          in_bank: Boolean(hitCard),
+          srs_stage: hitCard?.srs_stage || '',
+        };
+      });
       _recordStreakHit(snap, 0, 1, 18);
       await saveLocalSnapshot(snap);
       return _jsonResponse({
         engine: aiRes ? 'gemini' : 'offline',
         mode: body.mode || 'speaking',
         score,
-        verdict: aiRes?.verdict || (missing.length ? `Khớp ${matched.length}/${kws.length} từ khóa bắt buộc (Chế độ Offline Mobile).` : 'Xuất sắc! Bạn đã dùng đủ toàn bộ từ khóa mục tiêu (Offline Mobile).'),
+        verdict: aiRes?.verdict || (missing.length ? `Khớp ${matched.length}/${kws.length} từ khóa bắt buộc (Offline Mobile).` : 'Xuất sắc! Bạn đã dùng đủ toàn bộ từ khóa mục tiêu (Offline Mobile).'),
         user_original: body.user_en || '',
         corrected_user_en: aiRes?.corrected_user_en || body.user_en || '',
         grammar_notes: aiRes?.grammar_notes || [missing.length ? `Cần bổ sung: ${missing.join(', ')}` : 'Cấu trúc rõ ràng, giữ vững phản xạ tự nhiên.'],
@@ -1053,15 +1688,29 @@
         natural_en_interview: aiRes?.natural_en_interview || drill?.spoken_en || body.reference_en || body.user_en,
         matched_keywords: matched,
         missing_keywords: missing,
-        core_vocab: [],
+        core_vocab: coreVocab,
         active_recall_synced: [],
         ..._bootstrapPayloadFromSnap(snap),
       });
     }
     if (p === '/api/english/generate-reading' && m === 'POST') {
       const count = Math.min(10, Math.max(5, Number(body.count || 7)));
-      const cards = (snap.english_cards || []);
+      const cards = snap.english_cards || [];
       const picked = [...cards.filter((c) => c.is_due), ...cards.filter((c) => !c.is_due)].slice(0, count);
+      const termsTxt = picked.map((c) => `${c.term} (${c.meaning_vi})`).join('; ');
+      const aiReading = picked.length ? await _callGeminiJsonDirect(
+        `Write an authentic 3-paragraph English industrial electronics / PLC field engineering report incorporating these ${picked.length} terms verbatim: ${termsTxt}.\nAlso create 3 Vietnamese/English comprehension MCQ questions testing these terms.\nReturn JSON ONLY: {"title_en": "...", "title_vi": "...", "paragraphs": [{"en": "...", "vi": "..."}], "questions": [{"question": "...", "options": ["A","B","C","D"], "correct_index": 0, "explanation_vi": "..."}]}`
+      ) : null;
+      if (aiReading && Array.isArray(aiReading.paragraphs) && aiReading.paragraphs.length) {
+        return _jsonResponse({
+          engine: 'gemini',
+          title_en: aiReading.title_en || 'Field Service Bulletin',
+          title_vi: aiReading.title_vi || 'Bản tin Xử lý Sự cố Kỹ thuật',
+          target_cards: picked,
+          paragraphs: aiReading.paragraphs.slice(0, 4),
+          questions: Array.isArray(aiReading.questions) ? aiReading.questions.slice(0, 3) : [],
+        });
+      }
       const p1 = picked.slice(0, 3).map((c) => c.example_en || `Inspect ${c.term} first during troubleshooting.`).join(' ');
       const p2 = picked.slice(3, 6).map((c) => c.example_en || `Verify ${c.term} under load conditions.`).join(' ');
       const p3 = picked.slice(6).map((c) => c.example_en || `Document ${c.term} in the maintenance log.`).join(' ') || `Remember to log ${picked[0]?.term || 'key findings'} cleanly after verification.`;
@@ -1090,14 +1739,36 @@
     }
     if (p === '/api/english/magic-fill' && m === 'POST') {
       const term = String(body.term || '').trim();
+      const low = term.toLowerCase();
       const ai = await _callGeminiJsonDirect(
         `Fill technical English SRS flashcard for electronics/automation term "${term}". Return JSON: term, ipa, word_class, category, meaning_vi, collocations, example_en, example_vi.`
       );
-      return _jsonResponse(ai || {
+      if (ai && ai.meaning_vi) return _jsonResponse({ engine: 'gemini', ...ai });
+      const cardHit = (snap.english_cards || []).find((c) => String(c.term || '').trim().toLowerCase() === low);
+      if (cardHit) return _jsonResponse({ engine: 'database', ...cardHit });
+      const glossHit = (snap.en_glossary || []).find((g) => {
+        const ge = String(g.en || '').trim().toLowerCase();
+        return ge === low || ge.includes(low) || low.includes(ge);
+      });
+      if (glossHit) {
+        return _jsonResponse({
+          engine: 'offline',
+          term,
+          ipa: '/.../',
+          word_class: term.split(/\s+/).length >= 4 ? 'Lexical Chunk' : 'Noun',
+          category: _normalizeEnCat(glossHit.category || body.category_hint, term),
+          meaning_vi: glossHit.vi,
+          collocations: `inspect ${term}, verify ${term}`,
+          example_en: `Technicians inspect ${term} during routine drive and PLC diagnostics.`,
+          example_vi: `Kỹ thuật viên kiểm tra ${glossHit.vi.toLowerCase()} trong quá trình chẩn đoán biến tần và PLC.`,
+        });
+      }
+      return _jsonResponse({
+        engine: 'offline',
         term,
         ipa: '/.../',
         word_class: term.includes(',') || term.split(' ').length >= 4 ? 'Lexical Chunk' : 'Noun',
-        category: 'PLC & Tự động hóa',
+        category: _normalizeEnCat(body.category_hint, term),
         meaning_vi: `Thuật ngữ kỹ thuật: ${term}`,
         collocations: `inspect ${term}, verify ${term}`,
         example_en: `Always verify ${term} according to the engineering datasheet.`,
@@ -1114,7 +1785,7 @@
           term: g.en,
           ipa: '/.../',
           word_class: 'Noun',
-          category: g.category === 'NET' ? 'Mạng truyền thông' : (g.category === 'PLC' ? 'PLC & Tự động hóa' : 'Biến tần & Phần cứng'),
+          category: _normalizeEnCat(g.category, g.en),
           meaning_vi: g.vi || g.note || g.en,
           example_en: `Check ${g.en} during system inspection.`,
           example_vi: g.vi || '',
@@ -1123,7 +1794,7 @@
       });
       return _jsonResponse({
         scanned_records: (snap.repair_cases?.length || 0) + (snap.knowledge_items?.length || 0) + (snap.plc_notes?.length || 0) + (snap.network_notes?.length || 0),
-        candidate_cards: candidates.slice(0, 12),
+        candidate_cards: candidates.slice(0, 15),
         candidate_drills: [],
       });
     }
@@ -1131,23 +1802,73 @@
       const txt = String(body.manual_text || '');
       const cards = snap.english_cards || [];
       const existingLow = new Set(cards.map((c) => String(c.term || '').toLowerCase()));
-      const matches = txt.match(/\b(?:pre-charge resistor|inrush current|bootstrap capacitor|optocoupler|gate driver|scan cycle|wiring diagram|terminating resistors?|ground loop|dc bus|undervoltage|overcurrent)\b/gi) || [];
+
+      const aiExt = await _callGeminiJsonDirect(
+        `Extract 6 to 10 important technical English terms or lexical chunks from this industrial engineering manual excerpt and translate to Vietnamese.\nText:\n${txt.slice(0, 3000)}\nReturn JSON ONLY: {"summary_vi": "...", "terms": [{"term": "...", "ipa": "...", "word_class": "...", "category": "...", "meaning_vi": "...", "collocations": "...", "example_en": "...", "example_vi": "..."}]}`
+      );
+      if (aiExt && Array.isArray(aiExt.terms) && aiExt.terms.length) {
+        const aiTerms = aiExt.terms.slice(0, 10).map((it) => ({
+          term: String(it.term || '').trim(),
+          ipa: String(it.ipa || '/.../'),
+          word_class: String(it.word_class || 'Noun'),
+          category: _normalizeEnCat(it.category, it.term),
+          meaning_vi: String(it.meaning_vi || '').trim(),
+          collocations: String(it.collocations || ''),
+          example_en: String(it.example_en || ''),
+          example_vi: String(it.example_vi || ''),
+          already_in_bank: existingLow.has(String(it.term || '').trim().toLowerCase()),
+        })).filter((it) => it.term && it.meaning_vi);
+        if (aiTerms.length) {
+          return _jsonResponse({
+            engine: 'gemini',
+            summary_vi: aiExt.summary_vi || `Đã bóc tách ${aiTerms.length} thuật ngữ bằng Gemini AI.`,
+            terms: aiTerms,
+          });
+        }
+      }
+
+      const lowTxt = txt.toLowerCase();
+      const sents = txt.split(/(?<=[.!?])\s+|\n+/).map((s) => s.trim()).filter(Boolean);
+      const findSent = (phrase) => sents.find((s) => s.toLowerCase().includes(phrase.toLowerCase())) || sents[0] || txt.slice(0, 160);
       const seen = new Set();
       const terms = [];
-      matches.forEach((mStr) => {
-        const clean = mStr.trim();
-        if (seen.has(clean.toLowerCase())) return;
+
+      [...cards, ...(snap.en_glossary || []).map((g) => ({ term: g.en, meaning_vi: g.vi, category: g.category, ipa: '' }))].forEach((entry) => {
+        if (terms.length >= 10) return;
+        const enT = String(entry.term || '').trim();
+        const base = enT.replace(/\s*[\(\[].*?[\)\]]/g, '').trim().toLowerCase();
+        if (base.length >= 4 && lowTxt.includes(base) && !seen.has(enT.toLowerCase())) {
+          seen.add(enT.toLowerCase());
+          terms.push({
+            term: enT,
+            ipa: entry.ipa || '/.../',
+            word_class: enT.split(/\s+/).length >= 4 ? 'Lexical Chunk' : 'Noun',
+            category: _normalizeEnCat(entry.category, enT),
+            meaning_vi: entry.meaning_vi || enT,
+            example_en: findSent(base),
+            example_vi: entry.example_vi || `Ngữ cảnh Manual: ${entry.meaning_vi || enT}.`,
+            already_in_bank: existingLow.has(enT.toLowerCase()),
+          });
+        }
+      });
+
+      const compMatches = txt.match(/\b(?:[A-Z]{2,6}\s+[A-Za-z]{3,14}|(?:DC|AC|PWM|IGBT|PLC|PID|RS485|PROFINET|Modbus)\s+[A-Za-z-]{3,16}|[a-z]+(?:ing|ed)\s+(?:resistor|capacitor|circuit|voltage|current|fault|alarm|sensor|module|signal))\b/g) || [];
+      compMatches.forEach((mStr) => {
+        if (terms.length >= 10) return;
+        const clean = mStr.replace(/\s+/g, ' ').trim();
+        if (clean.length < 5 || seen.has(clean.toLowerCase())) return;
         seen.add(clean.toLowerCase());
         terms.push({
           term: clean,
           ipa: '/.../',
           word_class: 'Noun',
-          category: 'Biến tần & Phần cứng',
-          meaning_vi: `Thuật ngữ kỹ thuật bóc tách từ Manual (${clean})`,
-          example_en: txt.split(/[.!?]/).find((s) => s.toLowerCase().includes(clean.toLowerCase()))?.trim() || '',
+          category: _normalizeEnCat('', clean),
+          meaning_vi: `Cụm thuật ngữ trích từ Manual (${clean})`,
+          example_en: findSent(clean),
           already_in_bank: existingLow.has(clean.toLowerCase()),
         });
       });
+
       return _jsonResponse({
         engine: 'offline',
         summary_vi: `Đã bóc tách ${terms.length} thuật ngữ từ Manual (Offline Mobile).`,
@@ -1156,6 +1877,7 @@
     }
     if (p === '/api/english/bulk-ingest' && m === 'POST') {
       let insertedCards = 0;
+      let insertedDrills = 0;
       const existingLow = new Set((snap.english_cards || []).map((c) => String(c.term || '').toLowerCase()));
       (body.cards || []).forEach((c) => {
         const term = String(c.term || c.term_or_chunk || '').trim();
@@ -1166,12 +1888,12 @@
           term,
           ipa: c.ipa || '',
           word_class: c.word_class || 'Noun',
-          category: c.category || 'PLC & Tự động hóa',
+          category: _normalizeEnCat(c.category, term),
           meaning_vi: c.meaning_vi || term,
           collocations: c.collocations || '',
           example_en: c.example_en || '',
           example_vi: c.example_vi || '',
-          linked_record_id: c.linked_record_id || 'MOBILE',
+          linked_record_id: c.linked_record_id || c.source_ref || 'MOBILE',
           srs_stage: 'new',
           interval_days: 0,
           ease_factor: 2.5,
@@ -1184,12 +1906,96 @@
         existingLow.add(term.toLowerCase());
         insertedCards += 1;
       });
+      snap.english_combat_drills = snap.english_combat_drills || [];
+      const existingPrompts = new Set(snap.english_combat_drills.map((d) => String(d.source_vi || '').trim().toLowerCase()));
+      (body.drills || []).forEach((d) => {
+        const pVi = String(d.source_vi || d.prompt_vi || '').trim();
+        if (!pVi || existingPrompts.has(pVi.toLowerCase())) return;
+        const dMode = (d.drill_mode || d.mode) === 'interview' ? 'interview' : 'translation';
+        const did = _nextSeqId(snap.english_combat_drills, dMode === 'interview' ? 'CMB-INT' : 'CMB');
+        snap.english_combat_drills.push({
+          id: did,
+          drill_mode: dMode,
+          category: _normalizeEnCat(d.category || 'PLC & Tự động hóa'),
+          source_vi: pVi,
+          prompt_en: d.prompt_en || 'Translate or explain this engineering scenario in fluent English:',
+          target_keywords: d.target_keywords || [],
+          reference_en: d.reference_en || '',
+          spoken_en: d.spoken_en || '',
+          grammar_notes: d.grammar_notes || '',
+          linked_record_id: d.linked_record_id || '',
+          attempts: 0,
+          last_score: 0,
+          updated_at: utcNowIso(),
+        });
+        existingPrompts.add(pVi.toLowerCase());
+        insertedDrills += 1;
+      });
       await saveLocalSnapshot(snap);
-      return _jsonResponse({ inserted_cards: insertedCards, inserted_drills: 0, ..._bootstrapPayloadFromSnap(snap) });
+      return _jsonResponse({ inserted_cards: insertedCards, inserted_drills: insertedDrills, ..._bootstrapPayloadFromSnap(snap) });
     }
     if (p === '/api/english/generate-quiz' && m === 'POST') {
-      const cards = (snap.english_cards || []).slice(0, Math.min(12, Math.max(4, Number(body.count || 8))));
-      const quizzes = cards.map((c, idx) => {
+      const count = Math.min(12, Math.max(4, Number(body.count || 8)));
+      const catFilter = String(body.category || 'ALL');
+      const manualText = String(body.manual_text || '').trim();
+      let pool = (snap.english_cards || []).filter((c) => catFilter === 'ALL' || c.category === catFilter);
+      if (!pool.length) pool = (snap.english_cards || []);
+
+      if (manualText && getAiConfig().gemini_api_key) {
+        const aiQuiz = await _callGeminiJsonDirect(
+          `Create ${count} Technical English OpenQuiz questions (mix of mcq and cloze) from this industrial manual:\n${manualText.slice(0, 2800)}\nReturn JSON ONLY: JSON array of objects with keys quiz_type("mcq"|"cloze"), category, question_text, blank_answer, options(array of 4 strings), correct_index(0-3), explanation_vi, context_quote.`
+        );
+        if (Array.isArray(aiQuiz) && aiQuiz.length) {
+          const formatted = aiQuiz.slice(0, count).map((q, idx) => ({
+            id: `MOB-QZ-${Date.now()}-${idx}`,
+            quiz_type: q.quiz_type === 'cloze' ? 'cloze' : 'mcq',
+            category: _normalizeEnCat(q.category || catFilter),
+            question_text: String(q.question_text || '').trim(),
+            blank_answer: String(q.blank_answer || '').trim(),
+            options: Array.isArray(q.options) ? q.options.slice(0, 4) : [],
+            correct_index: Number(q.correct_index || 0),
+            explanation_vi: String(q.explanation_vi || ''),
+            context_quote: String(q.context_quote || ''),
+            source_ref: 'GEMINI-MOBILE',
+            status_code: 'review',
+          })).filter((q) => q.question_text && q.options.length >= 2);
+          if (formatted.length) {
+            return _jsonResponse({
+              engine: 'gemini',
+              generated_count: formatted.length,
+              items: formatted,
+              generated: formatted,
+              english_quizzes: snap.english_quizzes || [],
+            });
+          }
+        }
+      }
+
+      const quizzes = pool.slice(0, count).map((c, idx) => {
+        const isCloze = idx % 2 === 1 && c.example_en && c.example_en.toLowerCase().includes(c.term.toLowerCase());
+        if (isCloze) {
+          const masked = c.example_en.replace(new RegExp(_escapeRx(c.term), 'i'), '________');
+          const opts = [c.term];
+          (snap.english_cards || []).forEach((x) => {
+            if (opts.length < 4 && x.id !== c.id && x.term && !opts.includes(x.term)) opts.push(x.term);
+          });
+          while (opts.length < 4) opts.push('scan cycle');
+          const shift = idx % 4;
+          const rotated = opts.map((_, i) => opts[(i + shift) % 4]);
+          return {
+            id: `MOB-CLZ-${Date.now()}-${idx}`,
+            quiz_type: 'cloze',
+            category: c.category,
+            question_text: masked,
+            blank_answer: c.term,
+            options: rotated,
+            correct_index: rotated.indexOf(c.term),
+            explanation_vi: `${c.term}: ${c.meaning_vi}`,
+            context_quote: c.example_vi || '',
+            card_id: c.id,
+            status_code: 'review',
+          };
+        }
         const opts = [c.meaning_vi];
         (snap.english_cards || []).forEach((x) => {
           if (opts.length < 4 && x.id !== c.id && x.meaning_vi && !opts.includes(x.meaning_vi)) opts.push(x.meaning_vi);
@@ -1202,24 +2008,30 @@
           quiz_type: 'mcq',
           category: c.category,
           question_text: `Thuật ngữ "${c.term}" (${c.ipa || ''}) có nghĩa chuyên ngành nào đúng nhất?`,
+          blank_answer: '',
           options: rotated,
           correct_index: rotated.indexOf(c.meaning_vi),
           explanation_vi: `${c.term}: ${c.meaning_vi}`,
           context_quote: c.example_en || '',
           card_id: c.id,
+          status_code: 'review',
         };
       });
-      return _jsonResponse({ engine: 'offline', generated: quizzes.length, quizzes, english_quizzes: snap.english_quizzes || [] });
+      return _jsonResponse({
+        engine: 'offline',
+        generated_count: quizzes.length,
+        items: quizzes,
+        generated: quizzes,
+        english_quizzes: snap.english_quizzes || [],
+      });
     }
     if (p === '/api/en/translate' && m === 'POST') {
-      const txt = String(body.text || '').trim().toLowerCase();
-      const hit = (snap.en_glossary || []).find((g) => String(g.vi || '').toLowerCase() === txt || String(g.en || '').toLowerCase() === txt);
-      return _jsonResponse({ translated: hit ? `${hit.vi} ⇄ ${hit.en}` : txt, note: hit?.note || '' });
+      const res = await _translateSingleOfflineOrHybrid(body.text, body.source_lang, body.target_lang, snap);
+      return _jsonResponse(res);
     }
     if (p === '/api/en/translate-batch' && m === 'POST') {
-      const out = {};
-      (body.texts || []).forEach((t) => { out[t] = t; });
-      return _jsonResponse({ translations: out });
+      const res = await _translateBatchOfflineOrHybrid(body.texts, body.source_lang, body.target_lang, snap);
+      return _jsonResponse(res);
     }
     if (p === '/api/sync/config') {
       if (m === 'GET') {
@@ -1236,6 +2048,12 @@
     if ((p === '/api/sync' || p === '/api/sync/now') && m === 'POST') {
       const res = await syncNow(body.github_token, body.gist_id);
       return _jsonResponse(res);
+    }
+    if (p.startsWith('/api/excel/')) {
+      return _jsonResponse(
+        { detail: 'Xuất/Nhập Excel chỉ khả dụng khi kết nối máy tính (PC LAN). Trên điện thoại hãy dùng Sao lưu JSON / Cloud Sync.' },
+        400
+      );
     }
 
     return _jsonResponse({ ok: true, offline: true });
@@ -1416,6 +2234,8 @@
       scratchpads: mergedSp,
       review_progress: mergedRp,
       workspace_categories: mergedCats,
+      en_glossary: (localSnap.en_glossary && localSnap.en_glossary.length) ? localSnap.en_glossary : (remoteSnap.en_glossary || []),
+      translation_cache: _mergeTranslationMaps(localSnap.translation_cache, remoteSnap.translation_cache),
       tombstones,
     };
     _refreshDerivedFields(merged);
@@ -1500,7 +2320,7 @@
       gid = created.gist_id;
     }
     const gMeta = await _ghFetch(`https://api.github.com/gists/${encodeURIComponent(gid)}`, 'GET', tok);
-    const fobj = gMeta.files?.mrl_cloud_sync?.json || gMeta.files?.['mrl_cloud_sync.json'] || Object.values(gMeta.files || {})[0];
+    const fobj = gMeta.files?.['mrl_cloud_sync.json'] || Object.values(gMeta.files || {})[0];
     let remoteSnap = {};
     if (fobj) {
       let rawText = fobj.content || '{}';
@@ -1597,6 +2417,7 @@
 
   window.MRLCoreStore = {
     getMode: () => _mode,
+    resolveAssetUrl,
     ensureLocalSnapshot,
     saveLocalSnapshot,
     getAiConfig,

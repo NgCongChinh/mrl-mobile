@@ -12,6 +12,8 @@
   function applyTheme(theme) {
     if (theme === 'light') document.documentElement.dataset.theme = 'light';
     else delete document.documentElement.dataset.theme;
+    const metaTheme = document.querySelector('meta[name="theme-color"]');
+    if (metaTheme) metaTheme.setAttribute('content', theme === 'light' ? '#FFFFFF' : '#0B0B0C');
     try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* bỏ qua */ }
     $$('.theme-btn').forEach(updateThemeBtn);
   }
