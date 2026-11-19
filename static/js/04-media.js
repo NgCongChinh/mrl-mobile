@@ -829,7 +829,8 @@ function renderCustomSectionsHtml(sections = [], prefixKey = 'sec', highlightTag
 
     const title = s.title || `MỤC ${pad2(idx + 1)}`;
     const style = s.style || 'info';
-    const content = s.content || '';
+    const rawContent = String(s.content || '');
+    const content = style === 'code' ? rawContent.replace(/^\n+|\n+$/g, '') : rawContent.trim();
     const imgs = s.images || [];
     const secKey = `${prefixKey}:${idx}`;
     sectionRawTextMap[secKey] = {
@@ -853,11 +854,7 @@ function renderCustomSectionsHtml(sections = [], prefixKey = 'sec', highlightTag
     const imgsHtml = imgs.map((im) => {
       const ix = Math.max(0, Math.round(im.x || 0));
       const resolvedUrl = typeof resolveAssetUrl === 'function' ? resolveAssetUrl(im.url) : im.url;
-      return `
-      <div class="detail-floating-img" style="left:${ix}px; top:${Math.round(im.y || 0)}px; width:${Math.round(im.width || 280)}px; max-width:calc(100% - ${ix + 8}px); height:${Math.round(im.height || 180)}px;"
-           onclick="openLightbox('${escapeHtml(resolvedUrl)}', '${escapeHtml(title)}')">
-        <img src="${escapeHtml(resolvedUrl)}" alt="${escapeHtml(title)}" />
-      </div>`;
+      return `<div class="detail-floating-img" style="left:${ix}px; top:${Math.round(im.y || 0)}px; width:${Math.round(im.width || 280)}px; max-width:calc(100% - ${ix + 8}px); height:${Math.round(im.height || 180)}px;" onclick="openLightbox('${escapeHtml(resolvedUrl)}', '${escapeHtml(title)}')"><img src="${escapeHtml(resolvedUrl)}" alt="${escapeHtml(title)}" /></div>`;
     }).join('');
 
     const editCall = inlineOpts
@@ -874,12 +871,7 @@ function renderCustomSectionsHtml(sections = [], prefixKey = 'sec', highlightTag
       ? `<div class="inline-empty-prompt" onclick="${editCall}">+ Mục này đang trống — bấm vào đây để viết hoặc dán ảnh (Ctrl+V) ngay...</div>`
       : '<span style="color:var(--text-3);">— Trống —</span>';
 
-    const innerBox = `
-      <div class="detail-canvas-box" ${minH ? `style="min-height:${Math.ceil(minH)}px;"` : ''}>
-        <div class="detail-canvas-text">${content ? fmt(content) : (imgs.length ? '' : emptyHtml)}</div>
-        ${imgsHtml}
-      </div>
-      ${biPanelHtml}`;
+    const innerBox = `<div class="detail-canvas-box"${minH ? ` style="min-height:${Math.ceil(minH)}px;"` : ''}><div class="detail-canvas-text">${content ? fmt(content) : (imgs.length ? '' : emptyHtml)}</div>${imgsHtml}</div>${biPanelHtml}`;
 
     if (style === 'code') {
       const bufKey = `${prefixKey}:${idx}`;

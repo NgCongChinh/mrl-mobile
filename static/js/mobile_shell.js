@@ -191,7 +191,8 @@
     if (!_mobileDetail) return;
     const rec = _getDetailRecord(_mobileDetail.kind, _mobileDetail.id);
     if (idEl) {
-      const titleHint = rec?.brand_model || rec?.topic_model || rec?.title || rec?.target_device || rec?.term || '';
+      const rawHint = rec?.brand_model || rec?.topic_model || rec?.title || rec?.target_device || rec?.term || '';
+      const titleHint = String(rawHint).replace(/\s*\n+\s*/g, ' — ').trim();
       idEl.textContent = titleHint ? `${_mobileDetail.id} · ${titleHint}` : String(_mobileDetail.id);
     }
     if (stEl) {

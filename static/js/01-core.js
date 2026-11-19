@@ -338,23 +338,29 @@ function showToast(message, type = 'info') {
   setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 260); }, 3200);
 }
 
+function applyInlineMarkdownBold(html) {
+  if (!html || !html.includes('**')) return html;
+  return String(html).replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>');
+}
+
 function highlightTagsHtml(text, compTags = [], faultCodes = []) {
-  const safe = escapeHtml(text || '');
+  const safe = escapeHtml(String(text || '').trim());
   if (!safe) return '';
   const finalize = (html) => (typeof decorateTechnicalTermsInHtml === 'function' ? decorateTechnicalTermsInHtml(html) : html);
   const tokenMap = new Map();
   (faultCodes || []).forEach((t) => { if (t) tokenMap.set(t.toUpperCase(), { raw: t, kind: 'fault' }); });
   (compTags || []).forEach((t) => { if (t && !tokenMap.has(t.toUpperCase())) tokenMap.set(t.toUpperCase(), { raw: t, kind: 'comp' }); });
-  if (tokenMap.size === 0) return finalize(safe);
+  if (tokenMap.size === 0) return finalize(applyInlineMarkdownBold(safe));
   const sorted = Array.from(tokenMap.values()).sort((a, b) => b.raw.length - a.raw.length);
   const pattern = sorted.map((t) => escapeRegExp(escapeHtml(t.raw))).join('|');
   const regex = new RegExp(`(?<![A-Za-z0-9_])(${pattern})(?![A-Za-z0-9_])`, 'gi');
-  return finalize(safe.replace(regex, (m) => {
+  const tagged = safe.replace(regex, (m) => {
     const meta = tokenMap.get(m.toUpperCase());
     if (!meta) return m;
     const canon = escapeHtml(meta.raw);
     return `<button type="button" class="itag itag-${meta.kind}" onclick="event.stopPropagation(); openCrossRefDrawer('${canon}')" title="Tra cứu liên kết chéo: ${canon}">${m}</button>`;
-  }));
+  });
+  return finalize(applyInlineMarkdownBold(tagged));
 }
 
 function renderTagPills(compTags = [], faultCodes = [], limit = null) {

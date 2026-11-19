@@ -82,12 +82,14 @@ function renderRepairsView() {
 }
 
 function specRow(cls, key, value, c) {
-  const body = value ? highlightTagsHtml(value, c.component_tags, c.fault_codes) : '<span class="none">— Chưa ghi nhận —</span>';
+  const cleanVal = String(value || '').trim();
+  const body = cleanVal ? highlightTagsHtml(cleanVal, c.component_tags, c.fault_codes) : '<span class="none">— Chưa ghi nhận —</span>';
   return `<div class="spec-row ${cls}"><div class="spec-k">${key}</div><div class="spec-v">${body}</div></div>`;
 }
 
 function buildRepairDetailHtml(c, opts = {}) {
   const { showNav = true, currentIdx = 0, total = 1, showDropzone = true } = opts;
+  const cleanNote = String(c.note || '').trim();
   const steps = c.steps && c.steps.length ? c.steps
     : [{ step_order: 1, symptom: c.fault_symptom_raw || '', root_cause: c.root_cause_raw || '', solution: c.solution_raw || '' }];
 
@@ -127,7 +129,7 @@ function buildRepairDetailHtml(c, opts = {}) {
 
       <div class="warn">
         <div class="warn-title"><span>LƯU Ý CẤP NGUỒN TEST &amp; CẤU HÌNH VẬN HÀNH</span><a onclick="openRepairModal('${escapeHtml(c.id)}')">Sửa ghi chú</a></div>
-        <div class="warn-body">${c.note ? highlightTagsHtml(c.note, c.component_tags, c.fault_codes) : '<span style="color:var(--text-3);font-size:12px;">Chưa có lưu ý cấp nguồn test (24VDC / DC bus, chân jump kích chạy, dòng boot, thông số cài đặt).</span>'}</div>
+        <div class="warn-body">${cleanNote ? highlightTagsHtml(cleanNote, c.component_tags, c.fault_codes) : '<span style="color:var(--text-3);font-size:12px;">Chưa có lưu ý cấp nguồn test (24VDC / DC bus, chân jump kích chạy, dòng boot, thông số cài đặt).</span>'}</div>
       </div>
 
       <div id="repair-bilingual-host-${escapeHtml(c.id)}" class="bilingual-sec-wrap hidden"></div>
@@ -266,7 +268,7 @@ function renderKnowledgeView() {
 function buildKnowledgeDetailHtml(k, opts = {}) {
   const { showNav = true, currentIdx = 0, total = 1, showDropzone = true, codePrefix = '', pane = 'primary', inline = true } = opts;
   const sopMode = isSopCategory(k.category);
-  const hl = (t) => highlightTagsHtml(t, k.component_tags);
+  const hl = (t) => highlightTagsHtml(String(t || '').trim(), k.component_tags);
   let body = '';
 
   if (sopMode) {
