@@ -1785,6 +1785,11 @@ document.addEventListener('keydown', (e) => {
       saveInlineSectionNow(true);
       return;
     }
+    if (state.repairInlineEdit) {
+      e.preventDefault();
+      if (typeof commitActiveRepairInlineEdit === 'function') commitActiveRepairInlineEdit();
+      return;
+    }
     const activeElId = document.activeElement?.id || '';
     if (activeElId === 'pane2-scratchpad-textarea' || (state.splitMode && state.activePane === 'secondary' && state.pane2?.group === 'scratchpad')) {
       e.preventDefault();
@@ -1825,6 +1830,9 @@ document.addEventListener('keydown', (e) => {
     }
     if (state.inlineChipEdit) {
       cancelChipInlineEdit();
+      return;
+    }
+    if (typeof cancelActiveRepairInlineEdit === 'function' && cancelActiveRepairInlineEdit()) {
       return;
     }
     if (state.activeWorkspace && FOCUS_TABS.includes(state.activeTab)) {

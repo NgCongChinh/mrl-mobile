@@ -870,7 +870,7 @@
 
     (state.repairCases || []).forEach((r) => {
       if (hits.length >= 12) return;
-      const hay = [r.id, r.brand_model, r.device_category, r.fault_symptom_raw, r.root_cause_raw, r.solution_raw, r.note, ...(r.fault_codes || []), ...(r.component_tags || [])].join(' ').toLowerCase();
+      const hay = [r.id, r.brand_model, r.device_category, r.cold_check_raw, r.fault_symptom_raw, r.root_cause_raw, r.solution_raw, r.note, ...(r.fault_codes || []), ...(r.component_tags || [])].join(' ').toLowerCase();
       if (hay.includes(q)) {
         pushHit('mrl', 'repairs', 'repair', r.id, 'REPAIR', r.brand_model || r.id, r.fault_symptom_raw || r.device_category || '');
       }

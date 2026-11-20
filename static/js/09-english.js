@@ -647,6 +647,29 @@ const UI_I18N_MAP = {
   'Đồng bộ': 'Sync',
   '← Quay lại danh sách': '← Back to list',
   '📷 Chụp ảnh Bo mạch / Máy đo': '📷 Capture PCBA / Meter Photo',
+  'TIẾP NHẬN & ĐO NGUỘI (COLD CHECK)': 'INTAKE & COLD CHECK',
+  '+ Thêm ngoại quan & đo nguội (Cold Check)': '+ Add visual & cold check notes',
+  '⚡ Chèn mẫu đo nguội': '⚡ Insert Cold Check Template',
+  '+ Thêm lưu ý cấp nguồn test (24VDC / DC bus, chân jump, dòng boot...)': '+ Add bench power-up & config notes (24VDC / DC bus, jumper, boot current...)',
+  '+ Mã lỗi': '+ Fault Code',
+  '+ Linh kiện': '+ Component',
+  '✕ Xóa bước': '✕ Delete Step',
+  '✓ Lưu': '✓ Save',
+  'Hủy (Esc)': 'Cancel (Esc)',
+  'Click để sửa': 'Click to edit',
+  'Ctrl+Enter lưu · Esc hủy': 'Ctrl+Enter save · Esc cancel',
+  'Enter lưu · Esc hủy': 'Enter save · Esc cancel',
+  'THÊM CA SỬA CHỮA MỚI': 'ADD NEW REPAIR CASE',
+  'Tạo ca & Bắt đầu đo': 'Create Case & Start Probing',
+  'Lưu ca sửa chữa': 'Save Repair Case',
+  'Nhóm thiết bị *': 'Equipment Group *',
+  'Hãng & Mã thiết bị (Model) *': 'Brand & Model *',
+  'Mã lỗi khách báo': 'Reported Fault Codes',
+  'Tiếp nhận & Đo nguội ban đầu (tùy chọn)': 'Initial Intake & Cold Check (optional)',
+  'Tiếp nhận & Đo nguội (Cold Check)': 'Intake & Cold Check',
+  '▸ Thêm ngay Bước 01 / Lưu ý nguồn': '▸ Add Step 01 / Power-Up Notes now',
+  'Linh kiện liên quan (phân cách dấu phẩy)': 'Related Components (comma-separated)',
+  'Lưu ý cấp nguồn test & cấu hình vận hành (24VDC / DC bus, chân jump, dòng boot, thông số)': 'Bench power-up & operating notes (24VDC / DC bus, jumper pins, boot current, params)',
 };
 
 const PLACEHOLDER_I18N_MAP = {
@@ -689,6 +712,16 @@ const PLACEHOLDER_I18N_MAP = {
   'VD: Check the pre-charge resistor if the VFD trips on DC bus undervoltage.': 'e.g. Check the pre-charge resistor if the VFD trips on DC bus undervoltage.',
   'VD: Kiểm tra điện trở mồi nếu biến tần báo lỗi thấp áp DC Bus.': 'e.g. Kiểm tra điện trở mồi nếu biến tần báo lỗi thấp áp DC Bus.',
   'Nhập tên mục mới (VD: HMI & SCADA, Motion Control...)...': 'New category name (e.g. HMI & SCADA, Motion Control...)...',
+  'VD: U1 NOT READY, oL1, rr': 'e.g. U1 NOT READY, oL1, rr',
+  'Ghi nhận ngoại quan cháy nổ/phồng tụ, kết quả đo nguội cầu chỉnh lưu, DC Bus, IGBT/MOSFET...': 'Visual inspection (burn/bulged caps), rectifier bridge, DC bus, IGBT/MOSFET cold check...',
+  'VD: Cấp 24VDC ngoài chân +24/CM trước, test đèn hạn dòng nối tiếp DC Bus...': 'e.g. Supply external 24VDC to +24/CM first, test DC bus through series lamp...',
+  'A3120, IGBT, MOSFET, 74HC14': 'A3120, IGBT, MOSFET, 74HC14',
+  'oL1, U1...': 'oL1, U1...',
+  'A3120, IGBT...': 'A3120, IGBT...',
+  'Hiện tượng / Điểm đo...': 'Symptom / Test point...',
+  'Nguyên nhân gốc rễ...': 'Root cause...',
+  'Cách xử lý & Linh kiện...': 'Solution & Components...',
+  'Hãng & Mã thiết bị...': 'Brand & Model...',
 };
 
 let _SORTED_I18N_ENTRIES = null;
@@ -1016,8 +1049,12 @@ function _translateUiLeafNodes(rootEl, toEn) {
     '#ctx-menu',
     '[data-no-i18n="1"]',
     '.detail-canvas-text',
+    '.detail-pane .cold-check-body',
     '.detail-pane .warn-body',
     '.detail-pane .nb-body',
+    '.rep-inline-editor',
+    '.rep-inline-editing',
+    '.tag-inline-wrap',
     '#crossref-body .nb-body',
     '#crossref-body .warn-body',
     '.fc-answer .nb-body',
@@ -1220,6 +1257,7 @@ async function translateVisibleRecordContentToEn() {
     '#app-shell .list-pane .row-step-count',
     '#app-shell .detail-pane .d-title',
     '#app-shell .detail-pane .detail-canvas-text',
+    '#app-shell .detail-pane .cold-check-body',
     '#app-shell .detail-pane .warn-body',
     '#app-shell .detail-pane .nb-body',
     '#app-shell .detail-pane .spec-v',
@@ -1235,7 +1273,7 @@ async function translateVisibleRecordContentToEn() {
 
   const targets = [];
   document.querySelectorAll(selectors.join(', ')).forEach((el) => {
-    if (el.closest('.hidden') || el.closest('#view-en-vocab-bank') || el.querySelector('.inline-empty-prompt') || el.closest('.bilingual-sec-wrap')) return;
+    if (el.closest('.hidden') || el.closest('#view-en-vocab-bank') || el.querySelector('.inline-empty-prompt') || el.closest('.bilingual-sec-wrap') || el.closest('.rep-inline-editing') || el.querySelector('.rep-inline-editor')) return;
     if (el.classList.contains('row-step-count') && el.closest('#plc-list, #network-list')) return;
     if (el.dataset.viHtmlOrig === undefined) {
       el.dataset.viHtmlOrig = el.innerHTML;
@@ -1243,7 +1281,7 @@ async function translateVisibleRecordContentToEn() {
     }
     const rawText = (el.dataset.viTextOrig || '').trim();
     if (!rawText) return;
-    const isMultiLine = el.classList.contains('detail-canvas-text') || el.classList.contains('warn-body') || el.classList.contains('nb-body') || el.classList.contains('spec-v') || el.classList.contains('fc-question-text');
+    const isMultiLine = el.classList.contains('detail-canvas-text') || el.classList.contains('cold-check-body') || el.classList.contains('warn-body') || el.classList.contains('nb-body') || el.classList.contains('spec-v') || el.classList.contains('fc-question-text');
     const lines = isMultiLine ? String(el.dataset.viTextOrig).split('\n') : [rawText];
     targets.push({ el, lines, isPlainTitle: el.classList.contains('row-title') || el.classList.contains('row-step-count') || el.classList.contains('d-title') || el.tagName === 'SPAN' || el.tagName === 'LI' });
   });
@@ -1968,6 +2006,7 @@ async function toggleCurrentRecordBilingual(explicitKind = null, explicitId = nu
     if (!c) return;
     const steps = c.steps && c.steps.length ? c.steps : [{ step_order: 1, symptom: c.fault_symptom_raw, root_cause: c.root_cause_raw, solution: c.solution_raw }];
     const lines = [c.brand_model];
+    if (c.cold_check_raw) lines.push(`Tiếp nhận & Đo nguội: ${c.cold_check_raw}`);
     if (c.note) lines.push(`Lưu ý: ${c.note}`);
     steps.forEach((s, idx) => {
       if (s.symptom) lines.push(`Bước ${idx + 1} - Hiện tượng: ${s.symptom}`);

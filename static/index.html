@@ -15,8 +15,8 @@
   <link rel="icon" type="image/png" sizes="192x192" href="/static/icons/icon-nc-192.png" />
   <link rel="stylesheet" href="/static/fonts.css?v=1" />
   <script>try{if(localStorage.getItem("mrl-theme")==="light"){document.documentElement.dataset.theme="light";var mc=document.querySelector('meta[name="theme-color"]');if(mc)mc.setAttribute("content","#FFFFFF");}if(localStorage.getItem("mrl-en-mode")!=="0")document.documentElement.classList.add("en-mode-on");if(localStorage.getItem("mrl-app-lang")==="en")document.documentElement.dataset.lang="en";}catch(e){}</script>
-  <link rel="stylesheet" href="/static/styles.css?v=35" />
-  <link rel="stylesheet" href="/static/mobile.css?v=13" />
+  <link rel="stylesheet" href="/static/styles.css?v=36" />
+  <link rel="stylesheet" href="/static/mobile.css?v=14" />
 </head>
 <body spellcheck="false">
 <input type="file" id="excel-import-input" accept=".xlsx,.xlsm" class="hidden" />
@@ -486,13 +486,13 @@
   <div class="modal">
     <div class="ov-head">
       <div class="ov-title" id="repair-modal-title"><span>THÊM CA SỬA CHỮA MỚI</span></div>
-      <button class="ov-x" onclick="closeRepairModal()">×</button>
+      <button type="button" class="ov-x" onclick="closeRepairModal()">×</button>
     </div>
-    <form id="repair-form" class="ov-body form" onsubmit="submitRepairForm(event)">
+    <form id="repair-form" class="ov-body form mode-create" onsubmit="submitRepairForm(event)">
       <input type="hidden" id="rep-form-id" />
-      <div class="fgrid c4">
+      <div class="fgrid rep-form-row1">
         <div>
-          <label class="lbl">Nhóm thiết bị *</label>
+          <label class="lbl" for="rep-form-category">Nhóm thiết bị *</label>
           <select id="rep-form-category" class="sel" required>
             <option value="VFD">VFD</option>
             <option value="Circuit_Board">Bo mạch (Circuit_Board)</option>
@@ -502,45 +502,66 @@
             <option value="Sensors">Cảm biến (Sensors)</option>
           </select>
         </div>
-        <div class="span2">
-          <label class="lbl">Hãng &amp; Mã thiết bị (Model) *</label>
+        <div>
+          <label class="lbl" for="rep-form-status">Trạng thái</label>
+          <select id="rep-form-status" class="sel">
+            <option value="researching">Đang nghiên cứu</option>
+            <option value="review">Cần xem lại</option>
+            <option value="mastered">Đã làm chủ</option>
+            <option value="unclassified">Chưa phân loại</option>
+          </select>
+        </div>
+        <div>
+          <label class="lbl" for="rep-form-date">Ngày</label>
+          <input id="rep-form-date" class="inp mono" type="text" placeholder="YYYY-MM-DD" />
+        </div>
+      </div>
+
+      <div class="fgrid rep-form-row2">
+        <div>
+          <label class="lbl" for="rep-form-model">Hãng &amp; Mã thiết bị (Model) *</label>
           <textarea id="rep-form-model" class="inp mono" rows="1" required placeholder="VD: Yaskawa F7 15kW - CIMR-F7H4015"></textarea>
         </div>
-        <div class="fgrid c2" style="gap:8px;">
-          <div><label class="lbl">Ngày</label><input id="rep-form-date" class="inp mono" type="text" placeholder="YYYY-MM-DD" /></div>
+        <div>
+          <label class="lbl" for="rep-form-faults">Mã lỗi khách báo</label>
+          <input id="rep-form-faults" class="inp mono" type="text" placeholder="VD: U1 NOT READY, oL1, rr" />
+        </div>
+      </div>
+
+      <div id="rep-form-cold-wrap" class="rep-form-cold-box">
+        <div class="lbl-row">
+          <label id="rep-form-cold-lbl" class="lbl" for="rep-form-cold">Tiếp nhận &amp; Đo nguội ban đầu (tùy chọn)</label>
+          <button type="button" class="btn btn-sm rep-tpl-btn" onclick="insertColdCheckTemplateToModal()">⚡ Chèn mẫu đo nguội</button>
+        </div>
+        <textarea id="rep-form-cold" class="inp" rows="4" placeholder="Ghi nhận ngoại quan cháy nổ/phồng tụ, kết quả đo nguội cầu chỉnh lưu, DC Bus, IGBT/MOSFET..."></textarea>
+      </div>
+
+      <details id="rep-form-advanced" class="rep-form-details">
+        <summary class="rep-form-summary">▸ Thêm ngay Bước 01 / Lưu ý nguồn</summary>
+        <div class="rep-form-adv-body">
           <div>
-            <label class="lbl">Trạng thái</label>
-            <select id="rep-form-status" class="sel">
-              <option value="review">Cần xem lại</option>
-              <option value="mastered">Đã làm chủ</option>
-              <option value="researching">Đang nghiên cứu</option>
-              <option value="unclassified">Chưa phân loại</option>
-            </select>
+            <div class="sec-head" style="margin-top:2px;">
+              <span class="sec-title">QUY TRÌNH BẮT BỆNH &amp; XỬ LÝ</span>
+              <button type="button" class="btn btn-sm btn-primary" onclick="addRepairStepRow()">+ Thêm bước kiểm tra</button>
+            </div>
+            <div id="rep-form-steps-container" class="stack"></div>
+          </div>
+
+          <div class="form-warn">
+            <label class="lbl" for="rep-form-note">Lưu ý cấp nguồn test &amp; cấu hình vận hành (24VDC / DC bus, chân jump, dòng boot, thông số)</label>
+            <textarea id="rep-form-note" class="inp" rows="3" placeholder="VD: Cấp 24VDC ngoài chân +24/CM trước, test đèn hạn dòng nối tiếp DC Bus..."></textarea>
+          </div>
+
+          <div id="rep-form-tags-wrap" class="hidden">
+            <label class="lbl" for="rep-form-tags">Linh kiện liên quan (phân cách dấu phẩy)</label>
+            <input id="rep-form-tags" class="inp mono" type="text" placeholder="A3120, IGBT, MOSFET, 74HC14" />
           </div>
         </div>
-      </div>
-
-      <div class="form-warn">
-        <label class="lbl">Lưu ý cấp nguồn test &amp; cấu hình vận hành (24VDC / DC bus, chân jump, dòng boot, thông số)</label>
-        <textarea id="rep-form-note" class="inp" rows="3"></textarea>
-      </div>
-
-      <div class="fgrid c2">
-        <div><label class="lbl">Linh kiện (phân cách dấu phẩy)</label><input id="rep-form-tags" class="inp mono" type="text" placeholder="A3120, IGBT, 74HC14" /></div>
-        <div><label class="lbl">Mã lỗi (phân cách dấu phẩy)</label><input id="rep-form-faults" class="inp mono" type="text" placeholder="oPE04, rr, oL1" /></div>
-      </div>
-
-      <div>
-        <div class="sec-head" style="margin-top:4px;">
-          <span class="sec-title">QUY TRÌNH BẮT BỆNH &amp; XỬ LÝ</span>
-          <button type="button" class="btn btn-sm btn-primary" onclick="addRepairStepRow()">+ Thêm bước kiểm tra</button>
-        </div>
-        <div id="rep-form-steps-container" class="stack"></div>
-      </div>
+      </details>
 
       <div class="form-foot">
         <button type="button" class="btn" onclick="closeRepairModal()">Hủy</button>
-        <button type="submit" class="btn btn-primary">Lưu ca sửa chữa</button>
+        <button type="submit" id="rep-form-submit-btn" class="btn btn-primary">Tạo ca &amp; Bắt đầu đo</button>
       </div>
     </form>
   </div>
@@ -1045,19 +1066,19 @@
   </div>
 </div>
 
-<script src="/static/js/core_store.js?v=5"></script>
-<script src="/static/js/01-core.js?v=13"></script>
+<script src="/static/js/core_store.js?v=6"></script>
+<script src="/static/js/01-core.js?v=14"></script>
 <script src="/static/js/02-boot.js?v=16"></script>
-<script src="/static/js/03-views.js?v=8"></script>
+<script src="/static/js/03-views.js?v=9"></script>
 <script src="/static/js/04-media.js?v=11"></script>
 <script src="/static/js/05-split.js?v=9"></script>
 <script src="/static/js/06-reference.js?v=9"></script>
-<script src="/static/js/07-flashcards.js?v=10"></script>
-<script src="/static/js/08-data.js?v=9"></script>
-<script src="/static/js/09-english.js?v=16"></script>
+<script src="/static/js/07-flashcards.js?v=11"></script>
+<script src="/static/js/08-data.js?v=10"></script>
+<script src="/static/js/09-english.js?v=17"></script>
 <script src="/static/js/10-english-hub.js?v=11"></script>
 <script src="/static/a11y.js?v=8"></script>
 <script src="/static/ui.js?v=11"></script>
-<script src="/static/js/mobile_shell.js?v=10"></script>
+<script src="/static/js/mobile_shell.js?v=11"></script>
 </body>
 </html>

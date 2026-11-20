@@ -16,6 +16,7 @@ async function quickUpdateStatus(parentType, id, statusCode) {
   };
   const url = endpointMap[parentType];
   if (state.inlineSectionEdit) await _flushInlineSectionOnLeave(false);
+  if (parentType === 'repair' && typeof flushActiveRepairInlineEdit === 'function') await flushActiveRepairInlineEdit();
   try {
     const res = await fetch(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status_code: statusCode }) });
     if (!res.ok) throw new Error('Cập nhật trạng thái thất bại');
@@ -43,6 +44,14 @@ async function deleteRecord(parentType, id) {
     clearTimeout(_inlineSecSaveTimer);
     state.inlineSectionEdit = null;
   }
+  if (parentType === 'repair') {
+    if (state.repairInlineEdit && state.repairInlineEdit.caseId === id) {
+      state.repairInlineEdit.cancelling = true;
+      state.repairInlineEdit = null;
+    }
+    if (state.repairTagAdd && state.repairTagAdd.caseId === id) state.repairTagAdd = null;
+    if (state.repairDraftSteps) delete state.repairDraftSteps[id];
+  }
   const endpointMap = {
     repair: `/api/repair-cases/${encodeURIComponent(id)}`,
     knowledge: `/api/knowledge-items/${encodeURIComponent(id)}`,
@@ -58,39 +67,70 @@ async function deleteRecord(parentType, id) {
   } catch (err) { showToast(err.message, 'error'); }
 }
 
+function insertColdCheckTemplateToModal() {
+  const ta = document.getElementById('rep-form-cold');
+  if (typeof appendColdCheckTemplateToTextarea === 'function') {
+    appendColdCheckTemplateToTextarea(ta);
+  }
+}
+
 function openRepairModal(caseId = null, appendBlankStep = false) {
+  if (typeof flushActiveRepairInlineEdit === 'function') flushActiveRepairInlineEdit();
   const modal = document.getElementById('repair-modal');
+  const form = document.getElementById('repair-form');
   const title = document.getElementById('repair-modal-title').querySelector('span');
   const container = document.getElementById('rep-form-steps-container');
+  const advDetails = document.getElementById('rep-form-advanced');
+  const tagsWrap = document.getElementById('rep-form-tags-wrap');
+  const coldLbl = document.getElementById('rep-form-cold-lbl');
+  const submitBtn = document.getElementById('rep-form-submit-btn');
   container.innerHTML = '';
   if (caseId) {
     const c = state.repairCases.find((x) => x.id === caseId);
     if (!c) return;
+    form?.classList.remove('mode-create');
+    form?.classList.add('mode-edit');
     title.textContent = `CHỈNH SỬA CA SỬA CHỮA · ${c.id}`;
     document.getElementById('rep-form-id').value = c.id;
     document.getElementById('rep-form-category').value = c.device_category;
     document.getElementById('rep-form-model').value = c.brand_model || '';
     document.getElementById('rep-form-date').value = c.record_date || '';
     document.getElementById('rep-form-status').value = c.status_code || 'review';
+    document.getElementById('rep-form-cold').value = c.cold_check_raw || '';
     document.getElementById('rep-form-note').value = c.note || '';
     document.getElementById('rep-form-tags').value = (c.component_tags || []).join(', ');
     document.getElementById('rep-form-faults').value = (c.fault_codes || []).join(', ');
+    if (advDetails) advDetails.open = true;
+    tagsWrap?.classList.remove('hidden');
+    if (coldLbl) coldLbl.textContent = 'Tiếp nhận & Đo nguội (Cold Check)';
+    if (submitBtn) submitBtn.textContent = 'Lưu ca sửa chữa';
     const steps = c.steps && c.steps.length ? c.steps : [{ symptom: c.fault_symptom_raw, root_cause: c.root_cause_raw, solution: c.solution_raw }];
     steps.forEach((s) => addRepairStepRow(s));
     if (appendBlankStep) addRepairStepRow({ symptom: '', root_cause: '', solution: '' });
   } else {
+    form?.classList.remove('mode-edit');
+    form?.classList.add('mode-create');
     title.textContent = 'THÊM CA SỬA CHỮA MỚI';
     document.getElementById('rep-form-id').value = '';
     document.getElementById('rep-form-category').value = state.repairFilters.category !== 'ALL' ? state.repairFilters.category : 'VFD';
     document.getElementById('rep-form-model').value = '';
     document.getElementById('rep-form-date').value = new Date().toISOString().slice(0, 10);
-    document.getElementById('rep-form-status').value = 'review';
+    document.getElementById('rep-form-status').value = 'researching';
+    document.getElementById('rep-form-cold').value = '';
     document.getElementById('rep-form-note').value = '';
     document.getElementById('rep-form-tags').value = '';
     document.getElementById('rep-form-faults').value = '';
+    if (advDetails) advDetails.open = false;
+    tagsWrap?.classList.add('hidden');
+    if (coldLbl) coldLbl.textContent = 'Tiếp nhận & Đo nguội ban đầu (tùy chọn)';
+    if (submitBtn) submitBtn.textContent = 'Tạo ca & Bắt đầu đo';
     addRepairStepRow({ symptom: '', root_cause: '', solution: '' });
   }
   modal.classList.remove('hidden');
+  if (typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
+  if (!caseId) {
+    setTimeout(() => document.getElementById('rep-form-model')?.focus(), 40);
+  }
 }
 function closeRepairModal() { document.getElementById('repair-modal').classList.add('hidden'); }
 
@@ -123,20 +163,23 @@ function renumberRepairStepRows() {
 async function submitRepairForm(event) {
   event.preventDefault();
   const id = document.getElementById('rep-form-id').value.trim();
-  const steps = Array.from(document.querySelectorAll('#rep-form-steps-container .rep-step-row')).map((r, i) => ({
-    step_order: i + 1,
-    symptom: r.querySelector('.step-symptom').value.trim(),
-    root_cause: r.querySelector('.step-cause').value.trim(),
-    solution: r.querySelector('.step-solution').value.trim(),
-  }));
+  const steps = Array.from(document.querySelectorAll('#rep-form-steps-container .rep-step-row'))
+    .map((r) => ({
+      symptom: r.querySelector('.step-symptom').value.trim(),
+      root_cause: r.querySelector('.step-cause').value.trim(),
+      solution: r.querySelector('.step-solution').value.trim(),
+    }))
+    .filter((s) => s.symptom || s.root_cause || s.solution)
+    .map((s, i) => ({ step_order: i + 1, ...s }));
   const csv = (v) => v.split(',').map((s) => s.trim().replace(/^#/, '')).filter(Boolean);
   const payload = {
     device_category: document.getElementById('rep-form-category').value,
     brand_model: document.getElementById('rep-form-model').value.trim(),
     record_date: document.getElementById('rep-form-date').value.trim() || null,
     status_code: document.getElementById('rep-form-status').value,
+    cold_check_raw: document.getElementById('rep-form-cold').value.trim(),
     note: document.getElementById('rep-form-note').value.trim(),
-    component_tags: csv(document.getElementById('rep-form-tags').value),
+    component_tags: id ? csv(document.getElementById('rep-form-tags').value) : [],
     fault_codes: csv(document.getElementById('rep-form-faults').value),
     steps,
   };
@@ -147,10 +190,29 @@ async function submitRepairForm(event) {
     if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || 'Lưu ca sửa chữa thất bại'); }
     const saved = await res.json();
     closeRepairModal();
+    if (state.repairDraftSteps) delete state.repairDraftSteps[saved.id];
+    if (state.repairFilters.category !== 'ALL' && state.repairFilters.category !== saved.device_category) {
+      state.repairFilters.category = 'ALL';
+    }
+    if (state.repairFilters.status !== 'ALL' && state.repairFilters.status !== saved.status_code) {
+      state.repairFilters.status = 'ALL';
+      const sf = document.getElementById('repair-status-filter');
+      if (sf) sf.value = 'ALL';
+    }
+    if (state.repairFilters.q) {
+      state.repairFilters.q = '';
+      const qi = document.getElementById('repair-search-input');
+      if (qi) qi.value = '';
+      document.getElementById('repair-search-clear')?.classList.add('hidden');
+    }
     state.selectedRepairId = saved.id;
+    if (!id && !state.repairsListPinned) state.repairsListCollapsed = true;
     enterWorkspace('mrl', 'repairs');
     showToast(`Đã lưu ${saved.id}`, 'success');
     await fetchBootstrap(true);
+    if (!id && typeof openMobileDetailOverlay === 'function') {
+      openMobileDetailOverlay('repair', saved.id);
+    }
   } catch (err) { showToast(err.message, 'error'); }
 }
 

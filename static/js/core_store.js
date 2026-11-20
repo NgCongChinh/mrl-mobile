@@ -1414,6 +1414,74 @@
     return 'Biến tần & Phần cứng';
   }
 
+  const _REPAIR_COMP_TAG_RE = /\b(?:IGBT|MOSFET|IPM|SSR|Opto(?:coupler)?|Transistor|Diode|Varistor|Relay|PLC|HMI|MCU|CT|A3120|PC410L|74HC14|MC74HC14|74ALVT16245|HC165AG|ITS5215L|ITS716G|LTC3850|LTC3545|LM2576T?|LM393|LM239|UC3844|PS9151|HCNW2611|P721F|2FL\s*20U|FR\s*2T|CP10TD1|PS12014-A|STN3NF06L|A82C251Y|A1050\/C|CNY64|TLP181|AS29F040-55TC|A788J|A314J|IMZ4|2SA1213|LP3961ES|IS121|7LB179|T6816|LPC219|LS14250)\b/gi;
+  const _REPAIR_FAULT_CODE_RE = /\b(?:oPE04|rr|oL1|EF4|CAL|Err\.14\.1|W66|RoPd|nst|ErH|oC|UV1|OC)\b/g;
+
+  function _cleanCompTagsJS(list) {
+    const out = new Set();
+    (list || []).forEach((t) => {
+      const c = String(t || '').trim().replace(/^#+/, '').toUpperCase();
+      if (c) out.add(c);
+    });
+    return Array.from(out).sort();
+  }
+
+  function _cleanFaultCodesJS(list) {
+    const out = new Set();
+    (list || []).forEach((f) => {
+      const c = String(f || '').trim().replace(/^#+/, '');
+      if (c) out.add(c);
+    });
+    return Array.from(out).sort();
+  }
+
+  function _extractRepairTagsJS(fullText, extraComponents, extraFaults) {
+    const text = String(fullText || '');
+    const compSet = new Set(_cleanCompTagsJS(extraComponents));
+    const faultSet = new Set(_cleanFaultCodesJS(extraFaults));
+    let m;
+    const compRe = new RegExp(_REPAIR_COMP_TAG_RE.source, 'gi');
+    while ((m = compRe.exec(text)) !== null) {
+      if (m[0]) compSet.add(m[0].toUpperCase());
+    }
+    const faultRe = new RegExp(_REPAIR_FAULT_CODE_RE.source, 'g');
+    while ((m = faultRe.exec(text)) !== null) {
+      if (m[0]) faultSet.add(m[0]);
+    }
+    return [Array.from(compSet).sort(), Array.from(faultSet).sort()];
+  }
+
+  function _formatRepairStepsRawJS(steps) {
+    if (!steps || !steps.length) return ['', '', ''];
+    if (steps.length === 1) {
+      const s = steps[0];
+      return [String(s.symptom || '').trim(), String(s.root_cause || '').trim(), String(s.solution || '').trim()];
+    }
+    const syms = [], causes = [], sols = [];
+    steps.forEach((st, idx) => {
+      const n = idx + 1;
+      if (String(st.symptom || '').trim()) syms.push(`${n}. ${String(st.symptom).trim()}`);
+      if (String(st.root_cause || '').trim()) causes.push(`${n}. ${String(st.root_cause).trim()}`);
+      if (String(st.solution || '').trim()) sols.push(`${n}. ${String(st.solution).trim()}`);
+    });
+    return [syms.join('\n'), causes.join('\n'), sols.join('\n')];
+  }
+
+  function _normalizeRepairStepsJS(rawSteps, baseTs = Date.now()) {
+    return (rawSteps || [])
+      .map((s) => ({
+        symptom: String(s?.symptom || '').trim(),
+        root_cause: String(s?.root_cause || '').trim(),
+        solution: String(s?.solution || '').trim(),
+      }))
+      .filter((s) => s.symptom || s.root_cause || s.solution)
+      .map((s, idx) => ({
+        step_id: baseTs + idx,
+        step_order: idx + 1,
+        ...s,
+      }));
+  }
+
   async function _parseBody(init) {
     if (!init || !init.body) return {};
     if (typeof FormData !== 'undefined' && init.body instanceof FormData) return init.body;
@@ -1463,22 +1531,38 @@
     if (p === '/api/repair-cases' && m === 'POST') {
       const id = (body.id || '').trim() || _nextSeqId(snap.repair_cases, 'REP');
       const [sc, sl] = _normalizeStatus(body.status_code);
-      const steps = (body.steps || []).length
-        ? body.steps.map((s, idx) => ({ step_id: Date.now() + idx, step_order: idx + 1, symptom: s.symptom || '', root_cause: s.root_cause || '', solution: s.solution || '' }))
-        : [{ step_id: Date.now(), step_order: 1, symptom: body.fault_symptom_raw || '', root_cause: body.root_cause_raw || '', solution: body.solution_raw || '' }];
+      const brandModel = String(body.brand_model || '').trim() || id;
+      const coldCheckRaw = String(body.cold_check_raw || '').trim();
+      const noteRaw = String(body.note || '').trim();
+      let steps = _normalizeRepairStepsJS(body.steps || []);
+      let faultRaw = String(body.fault_symptom_raw || '').trim();
+      let causeRaw = String(body.root_cause_raw || '').trim();
+      let solutionRaw = String(body.solution_raw || '').trim();
+      if (steps.length) {
+        const [fR, cR, sR] = _formatRepairStepsRawJS(steps);
+        faultRaw = faultRaw || fR;
+        causeRaw = causeRaw || cR;
+        solutionRaw = solutionRaw || sR;
+      } else if (faultRaw || causeRaw || solutionRaw) {
+        steps = [{ step_id: Date.now(), step_order: 1, symptom: faultRaw, root_cause: causeRaw, solution: solutionRaw }];
+      }
+      const stepsText = steps.map((s) => `${s.symptom} ${s.root_cause} ${s.solution}`).join(' ');
+      const fullText = `${brandModel} ${coldCheckRaw} ${faultRaw} ${causeRaw} ${solutionRaw} ${stepsText} ${noteRaw}`;
+      const [compTags, faultCodes] = _extractRepairTagsJS(fullText, body.component_tags, body.fault_codes);
       const rec = {
         id,
         record_date: body.record_date || localDateKey(),
         device_category: body.device_category || 'VFD',
-        brand_model: body.brand_model || id,
-        fault_symptom_raw: steps.map((s) => s.symptom).filter(Boolean).join('\n'),
-        root_cause_raw: steps.map((s) => s.root_cause).filter(Boolean).join('\n'),
-        solution_raw: steps.map((s) => s.solution).filter(Boolean).join('\n'),
-        note: body.note || '',
+        brand_model: brandModel,
+        cold_check_raw: coldCheckRaw,
+        fault_symptom_raw: faultRaw,
+        root_cause_raw: causeRaw,
+        solution_raw: solutionRaw,
+        note: noteRaw,
         status_code: sc,
         status_label: sl,
-        component_tags: body.component_tags || [],
-        fault_codes: body.fault_codes || [],
+        component_tags: compTags,
+        fault_codes: faultCodes,
         steps,
         attachments: [],
         created_at: utcNowIso(),
@@ -1489,7 +1573,71 @@
       await saveLocalSnapshot(snap);
       return _jsonResponse(rec, 201);
     }
-    let match = p.match(/^\/api\/repair-cases\/([^/]+)\/status$/);
+    let match = p.match(/^\/api\/repair-cases\/([^/]+)\/inline$/);
+    if (match && m === 'PATCH') {
+      const id = decodeURIComponent(match[1]);
+      const idx = (snap.repair_cases || []).findIndex((r) => r.id === id);
+      if (idx < 0) return _jsonResponse({ detail: 'Not found' }, 404);
+      const cur = snap.repair_cases[idx];
+      let nextBrand = cur.brand_model || id;
+      if (body.brand_model !== undefined && body.brand_model !== null) {
+        nextBrand = String(body.brand_model).trim();
+        if (!nextBrand) return _jsonResponse({ detail: 'Tên hãng & mã thiết bị không được để trống' }, 400);
+      }
+      const nextCold = (body.cold_check_raw !== undefined && body.cold_check_raw !== null)
+        ? String(body.cold_check_raw).trim()
+        : (cur.cold_check_raw || '');
+      const nextNote = (body.note !== undefined && body.note !== null)
+        ? String(body.note).trim()
+        : (cur.note || '');
+
+      let nextSteps = Array.isArray(cur.steps) ? cur.steps : [];
+      let nextFaultRaw = cur.fault_symptom_raw || '';
+      let nextCauseRaw = cur.root_cause_raw || '';
+      let nextSolRaw = cur.solution_raw || '';
+      if (Array.isArray(body.steps)) {
+        nextSteps = _normalizeRepairStepsJS(body.steps);
+        [nextFaultRaw, nextCauseRaw, nextSolRaw] = _formatRepairStepsRawJS(nextSteps);
+      }
+
+      const baseComps = Array.isArray(body.component_tags)
+        ? _cleanCompTagsJS(body.component_tags)
+        : (cur.component_tags || []);
+      const baseFaults = Array.isArray(body.fault_codes)
+        ? _cleanFaultCodesJS(body.fault_codes)
+        : (cur.fault_codes || []);
+
+      let compTags = baseComps;
+      let faultCodes = baseFaults;
+      if (!body.skip_auto_extract) {
+        const changedParts = [];
+        if (body.brand_model !== undefined && body.brand_model !== null) changedParts.push(nextBrand);
+        if (body.cold_check_raw !== undefined && body.cold_check_raw !== null) changedParts.push(nextCold);
+        if (body.note !== undefined && body.note !== null) changedParts.push(nextNote);
+        if (Array.isArray(body.steps)) {
+          changedParts.push(nextSteps.map((s) => `${s.symptom} ${s.root_cause} ${s.solution}`).join(' '));
+        }
+        [compTags, faultCodes] = _extractRepairTagsJS(changedParts.join(' '), baseComps, baseFaults);
+      }
+
+      const updated = {
+        ...cur,
+        brand_model: nextBrand,
+        cold_check_raw: nextCold,
+        fault_symptom_raw: nextFaultRaw,
+        root_cause_raw: nextCauseRaw,
+        solution_raw: nextSolRaw,
+        note: nextNote,
+        steps: nextSteps,
+        component_tags: compTags,
+        fault_codes: faultCodes,
+        updated_at: utcNowIso(),
+      };
+      snap.repair_cases[idx] = updated;
+      await saveLocalSnapshot(snap);
+      return _jsonResponse(updated);
+    }
+    match = p.match(/^\/api\/repair-cases\/([^/]+)\/status$/);
     if (match && m === 'PATCH') {
       const id = decodeURIComponent(match[1]);
       const rec = (snap.repair_cases || []).find((r) => r.id === id);
@@ -1509,13 +1657,31 @@
       if (m === 'PUT') {
         const cur = snap.repair_cases[idx];
         const [sc, sl] = _normalizeStatus(body.status_code);
-        const steps = (body.steps || []).length ? body.steps.map((s, i) => ({ ...s, step_order: i + 1 })) : cur.steps;
+        const brandModel = String(body.brand_model !== undefined ? body.brand_model : (cur.brand_model || id)).trim() || id;
+        const coldCheckRaw = String(body.cold_check_raw !== undefined ? body.cold_check_raw : (cur.cold_check_raw || '')).trim();
+        const noteRaw = String(body.note !== undefined ? body.note : (cur.note || '')).trim();
+        const steps = Array.isArray(body.steps) ? _normalizeRepairStepsJS(body.steps) : (cur.steps || []);
+        const [fR, cR, sR] = _formatRepairStepsRawJS(steps);
+        const faultRaw = steps.length ? fR : String(body.fault_symptom_raw || '').trim();
+        const causeRaw = steps.length ? cR : String(body.root_cause_raw || '').trim();
+        const solutionRaw = steps.length ? sR : String(body.solution_raw || '').trim();
+        const stepsText = steps.map((s) => `${s.symptom} ${s.root_cause} ${s.solution}`).join(' ');
+        const fullText = `${brandModel} ${coldCheckRaw} ${faultRaw} ${causeRaw} ${solutionRaw} ${stepsText} ${noteRaw}`;
+        const [compTags, faultCodes] = _extractRepairTagsJS(fullText, body.component_tags, body.fault_codes);
         const updated = {
           ...cur,
           ...body,
           id,
+          brand_model: brandModel,
+          cold_check_raw: coldCheckRaw,
+          fault_symptom_raw: faultRaw,
+          root_cause_raw: causeRaw,
+          solution_raw: solutionRaw,
+          note: noteRaw,
           status_code: sc,
           status_label: sl,
+          component_tags: compTags,
+          fault_codes: faultCodes,
           steps,
           updated_at: utcNowIso(),
         };
@@ -2217,6 +2383,7 @@
       (snap.repair_cases || []).forEach((r) => {
         const txt = [
           r.brand_model || '',
+          r.cold_check_raw || '',
           r.fault_symptom_raw || '',
           r.root_cause_raw || '',
           r.solution_raw || '',
