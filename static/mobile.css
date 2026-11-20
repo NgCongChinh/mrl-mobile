@@ -2464,4 +2464,81 @@
     flex-direction: column !important;
     gap: 8px !important;
   }
+
+  /* ==========================================================================
+     12. Flashcard Hybrid Grader & Follow-Up Mobile Polish (v13)
+     ========================================================================== */
+  .fc-wrap {
+    padding-bottom: 96px !important;
+  }
+  .fc-grader-card,
+  .fc-engine-badge,
+  .fc-score-chip,
+  .fc-suggest-badge,
+  .fc-auto-ai-pill,
+  .fc-verdict,
+  .fc-rubric-lbl,
+  .fc-rchip,
+  .fc-gblock,
+  .fc-gblock-title,
+  .fc-empty-grade-bar,
+  .fc-followup-card,
+  .fc-followup-q,
+  .fc-followup-ans,
+  .fc-rec-tag,
+  .fc-inline-edit-ta {
+    font-family: var(--font-sans) !important;
+    letter-spacing: 0 !important;
+  }
+  .fc-grader-card,
+  .fc-followup-card {
+    padding: 12px !important;
+    border-radius: 8px !important;
+  }
+  .fc-grader-head {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+  .fc-grader-acts {
+    width: 100% !important;
+    gap: 6px !important;
+  }
+  .fc-grader-acts .btn,
+  .fc-auto-ai-pill,
+  .fc-tools-row .btn,
+  .fc-supp-foot .btn,
+  .fc-empty-grade-bar .btn {
+    min-height: 38px !important;
+    font-size: 12.5px !important;
+    padding: 6px 10px !important;
+    justify-content: center !important;
+  }
+  .fc-grader-acts .btn {
+    flex: 1 1 auto !important;
+  }
+  .fc-rchip {
+    min-height: 32px !important;
+    padding: 4px 10px !important;
+    font-size: 12px !important;
+  }
+  .fc-gblock,
+  .fc-followup-q,
+  .fc-followup-ans {
+    font-size: 13.5px !important;
+    line-height: 1.55 !important;
+  }
+  .fc-supp-foot .btn {
+    width: 100% !important;
+  }
+  .fc-tools-row {
+    width: 100% !important;
+  }
+  .fc-tools-row .btn {
+    flex: 1 1 auto !important;
+  }
+  .fc-inline-edit-ta {
+    font-size: 14px !important;
+    min-height: 92px !important;
+  }
 }

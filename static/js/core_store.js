@@ -646,22 +646,26 @@
     return { gemini_api_key: nextKey, gemini_model: nextModel };
   }
 
-  async function _callGeminiJsonDirect(promptText) {
+  async function _callGeminiJsonDirect(promptText, overrideKey = '') {
     const cfg = getAiConfig();
-    const key = (cfg.gemini_api_key || '').trim();
+    const key = String(overrideKey || cfg.gemini_api_key || '').trim();
     if (!key) return null;
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return null;
     const model = cfg.gemini_model || 'gemini-2.0-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => { try { ctrl.abort(); } catch (_) {} }, 18000) : null;
     try {
-      const res = await _nativeFetch(url, {
+      const fetchOpts = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: [{ text: promptText }] }],
           generationConfig: { temperature: 0.35, responseMimeType: 'application/json' },
         }),
-      });
+      };
+      if (ctrl) fetchOpts.signal = ctrl.signal;
+      const res = await _nativeFetch(url, fetchOpts);
       if (!res.ok) return null;
       const data = await res.json();
       const txt = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
@@ -669,7 +673,377 @@
       return m ? JSON.parse(m[1]) : JSON.parse(txt);
     } catch (_) {
       return null;
+    } finally {
+      if (timer !== null) clearTimeout(timer);
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Flashcard Hybrid Grader (Offline Rubric + Direct-Gemini 2-Tier Parity)
+  // -------------------------------------------------------------------------
+  const _FC_SYNONYM_GROUPS = [
+    ['vo han', 'vo thoi han', 'lien tuc', 'khong dung', 'lap vo tan', 'lap lien tuc', 'vong lap vo han'],
+    ['ngat', 'dung', 'cat', 'interrupt', 'stop', 'trip'],
+    ['chap', 'ngan mach', 'thong mach', 'noi tat', 'short', 'short circuit'],
+    ['dut', 'ho mach', 'mat ket noi', 'open circuit', 'mat tin hieu'],
+    ['bien tan', 'vfd', 'inverter', 'drive'],
+    ['dien tro dau cuoi', 'dien tro 120', '120 ohm', '120ohm', 'termination resistor', 'tro 120'],
+    ['vong quet', 'scan cycle', 'chu ky quet', 'chu trinh quet'],
+    ['khoi ham', 'function block', 'fb'],
+    ['khoi to chuc', 'organization block', 'ob'],
+    ['vung nho', 'data block', 'db', 'bo nho'],
+    ['nguon', 'cap nguon', 'dien ap', 'power', 'supply', 'dc bus'],
+    ['qua dong', 'overcurrent', 'oc'],
+    ['qua ap', 'overvoltage', 'ov'],
+    ['thap ap', 'undervoltage', 'uv'],
+    ['qua tai', 'overload', 'ol'],
+    ['tu tren xuong duoi', 'tren xuong duoi', 'tuan tu', 'tu trai sang phai', 'theo thu tu'],
+    ['cach ly', 'quang', 'opto', 'optocoupler', 'isolation'],
+    ['xung kich', 'gate', 'gate drive', 'kich gate'],
+    ['nhieu', 'emi', 'chong nhieu', 'stp', 'noi mass', 'tiep dia', 'shield'],
+    ['khoi tao', 'init', 'startup', 'ob100'],
+    ['ngat chu ky', 'cyclic interrupt', 'ob30', 'ob35', 'thoi gian lay mau', 'sampling time'],
+    ['loi phan cung', 'loi rack', 'loi module', 'ob86', 'ob82', 'diagnostic'],
+    ['dau vao', 'input'],
+    ['dau ra', 'output'],
+    ['rs485', 'rs-485'],
+    ['s7-1200', 's7 1200', 's71200'],
+    ['s7-1500', 's7 1500', 's71500'],
+    ['canopen', 'can open'],
+    ['canbus', 'can bus'],
+  ];
+
+  const _FC_STOPWORDS = new Set([
+    'va', 'hoac', 'cua', 'la', 'de', 'khi', 'neu', 'thi', 'se', 'duoc', 'bi', 'co',
+    'khong', 'cac', 'nhung', 'mot', 'trong', 'tren', 'duoi', 'tai', 'voi', 'cho', 'tu',
+    'sang', 'vao', 'ra', 'rat', 'can', 'phai', 'nen', 'nay', 'do', 'thuong', 'hay',
+    'dang', 'da', 'lam', 'gay', 'giup', 'dung', 'bang', 'theo', 've', 'nhu', 'ma',
+    'boi', 'vi', 'moi', 'tung', 'nhieu', 'it', 'qua', 'lai', 'xong', 'con', 'su',
+    'the', 'and', 'for', 'with', 'from', 'that', 'this', 'into', 'onto', 'are', 'is',
+    'nguyen', 'nhan', 'xu', 'ly', 'cach', 'muc', 'buoc', 'note',
+  ]);
+
+  const _FC_TECH_TOKEN_RE = /(?:\b0x[0-9A-Fa-f]+(?::[0-9A-Fa-f]+)?\b|\b(?:OB|FB|FC|DB|UDT)\d*\b|\b(?:NORM_X|SCALE_X|S7-\d+|RS-?485|RS-?232|CANopen|CANbus|EtherCAT|PROFINET|PROFIBUS|Modbus|IGBT|MOSFET|SMPS|VFD|HMI|PLC|CPU|PID|PWM|SCL|LAD|FBD|PDO|SDO|ESI|WKC|SAFE-OP|PRE-OP)\b|\b[A-Z]\d{3,}[A-Z0-9/-]*\b|\b(?:oPE|oL|oC|oV|uV|EF)\d*\b|\b\d+(?:\.\d+)?(?:\s*[-~]\s*\d+(?:\.\d+)?)?\s*(?:ms|us|Hz|kHz|mA|VDC|VAC|kW|Ω|ohm|kΩ|uF|nF|kbps|Mbps|bps|bar)\b)/gi;
+
+  function _fcStripAccents(text) {
+    return String(text || '')
+      .replace(/[đĐ]/g, 'd')
+      .replace(/[Ωω]/g, ' ohm ')
+      .replace(/[μµ]/g, 'u')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9_.\-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function _fcEscapeRe(str) {
+    return String(str || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function _fcComputeRating(overallScore, hasCriticalError = false) {
+    if (hasCriticalError || overallScore < 60) return 'forgot';
+    if (overallScore < 85) return 'fuzzy';
+    return 'solid';
+  }
+
+  function _fcExtractRubricConcepts(referenceAnswer) {
+    const raw = String(referenceAnswer || '').trim();
+    if (!raw) return [];
+    const concepts = [];
+    const seenNorm = new Set();
+
+    const addConcept = (label) => {
+      const clean = String(label || '')
+        .replace(/\s+/g, ' ')
+        .replace(/^[\s.,;:!?•\-*]+|[\s.,;:!?•\-*]+$/g, '');
+      if (!clean || clean.length < 2) return;
+      const norm = _fcStripAccents(clean);
+      if (!norm || seenNorm.has(norm)) return;
+      const words = norm.split(' ').filter((w) => !_FC_STOPWORDS.has(w));
+      if (!words.length && norm.length < 2) return;
+      seenNorm.add(norm);
+      concepts.push(clean);
+    };
+
+    const reTok = new RegExp(_FC_TECH_TOKEN_RE.source, 'gi');
+    let m;
+    while ((m = reTok.exec(raw)) !== null) {
+      const tok = m[0].trim();
+      if (tok.length >= 2) addConcept(tok);
+      if (concepts.length >= 3) break;
+    }
+
+    const clauses = raw.split(/[\n.;,()→]|->|\s+:\s+|:\s+/);
+    for (const cl of clauses) {
+      if (concepts.length >= 6) break;
+      const cleaned = cl
+        .replace(/^\s*(?:\d+[\.\)]\s+|[•\-*]\s+|nguyên\s+nhân\s*:|xử\s+lý\s*:|note\s*:)\s*/i, '')
+        .trim();
+      if (!cleaned) continue;
+      const rawWords = cleaned.split(/\s+/);
+      while (rawWords.length && _FC_STOPWORDS.has(_fcStripAccents(rawWords[0]))) rawWords.shift();
+      while (rawWords.length && _FC_STOPWORDS.has(_fcStripAccents(rawWords[rawWords.length - 1]))) rawWords.pop();
+      if (!rawWords.length) continue;
+
+      const nonCodeWords = rawWords.filter((w) => !seenNorm.has(_fcStripAccents(w)));
+      if (nonCodeWords.length < rawWords.length && nonCodeWords.length <= 1) continue;
+
+      const joined = rawWords.join(' ');
+      if (rawWords.length <= 6 && joined.length <= 38) {
+        const candNorm = _fcStripAccents(joined);
+        if (!seenNorm.has(candNorm) && !(rawWords.length === 1 && _FC_STOPWORDS.has(candNorm))) {
+          addConcept(joined);
+        }
+      } else {
+        const step = 4;
+        for (let i = 0; i < rawWords.length; i += step) {
+          if (concepts.length >= 6) break;
+          const chunkWords = rawWords.slice(i, i + step);
+          while (chunkWords.length && _FC_STOPWORDS.has(_fcStripAccents(chunkWords[0]))) chunkWords.shift();
+          while (chunkWords.length && _FC_STOPWORDS.has(_fcStripAccents(chunkWords[chunkWords.length - 1]))) chunkWords.pop();
+          if (chunkWords.length >= 2) {
+            addConcept(chunkWords.join(' ').slice(0, 38).trim());
+          }
+        }
+      }
+    }
+
+    if (concepts.length < 3) {
+      const allWords = raw.split(/\s+/).map((w) => w.replace(/^[.,;:!?()[\]{}"']+|[.,;:!?()[\]{}"']+$/g, ''));
+      const meaningful = allWords.filter((w) => w.length >= 2 && !_FC_STOPWORDS.has(_fcStripAccents(w)));
+      for (let i = 0; i < meaningful.length; i += 2) {
+        if (concepts.length >= 4) break;
+        addConcept(meaningful.slice(i, i + 2).join(' '));
+      }
+    }
+
+    return concepts.slice(0, 6);
+  }
+
+  function _fcPhraseInText(phraseNorm, textNorm) {
+    if (!phraseNorm || !textNorm) return false;
+    if (phraseNorm.length <= 6 || (!phraseNorm.includes(' ') && /[0-9]/.test(phraseNorm))) {
+      const pat = new RegExp(`(?<![a-z0-9])${_fcEscapeRe(phraseNorm)}(?![a-z0-9])`);
+      return pat.test(textNorm);
+    }
+    return textNorm.includes(phraseNorm);
+  }
+
+  function _fcMatchConcept(concept, userNorm) {
+    const cNorm = _fcStripAccents(concept);
+    if (!cNorm || !userNorm) return false;
+    if (_fcPhraseInText(cNorm, userNorm)) return true;
+    if (cNorm.includes('-') && _fcPhraseInText(cNorm.replace(/-/g, ''), userNorm.replace(/-/g, ''))) return true;
+
+    for (const grp of _FC_SYNONYM_GROUPS) {
+      if (grp.some((p) => _fcPhraseInText(p, cNorm)) && grp.some((p) => _fcPhraseInText(p, userNorm))) {
+        return true;
+      }
+    }
+
+    const cWords = cNorm.split(' ').filter((w) => w.length >= 2 && !_FC_STOPWORDS.has(w));
+    if (cWords.length >= 2) {
+      let hits = 0;
+      for (const w of cWords) {
+        if (_fcPhraseInText(w, userNorm)) {
+          hits += 1;
+          continue;
+        }
+        const synHit = _FC_SYNONYM_GROUPS.some((grp) => grp.includes(w) && grp.some((p) => _fcPhraseInText(p, userNorm)));
+        if (synHit) hits += 1;
+      }
+      if (hits / cWords.length >= 0.65) return true;
+    }
+
+    return false;
+  }
+
+  function evaluateFlashcardOfflineJS(referenceAnswer, userAnswer) {
+    const concepts = _fcExtractRubricConcepts(referenceAnswer);
+    const userNorm = _fcStripAccents(userAnswer);
+    const rubric = [];
+    const matched = [];
+    const missing = [];
+
+    concepts.forEach((c) => {
+      const hit = Boolean(userNorm) && _fcMatchConcept(c, userNorm);
+      rubric.push({ label: c, hit });
+      if (hit) matched.push(c);
+      else missing.push(c);
+    });
+
+    const total = rubric.length;
+    const noteScore = total > 0 ? Math.round((matched.length / total) * 100) : (userNorm ? 100 : 0);
+    const rating = _fcComputeRating(noteScore, false);
+    let verdict = 'Bạn chưa nhập câu trả lời — hãy gõ nhanh ý chính rồi bấm Chấm lại.';
+    if (userNorm) {
+      if (noteScore >= 85) verdict = `Khớp rất tốt ${matched.length}/${total} ý lõi trong bài gốc (Offline Rubric).`;
+      else if (noteScore >= 60) verdict = `Đã nắm ${matched.length}/${total} ý chính — cần bổ sung thêm ${missing.length} ý còn thiếu.`;
+      else verdict = `Mới khớp ${matched.length}/${total} ý lõi — nên xem lại bài gốc hoặc chấm 2 tầng AI.`;
+    }
+
+    return {
+      engine: 'offline',
+      note_match_score: noteScore,
+      tech_accuracy_score: null,
+      overall_score: noteScore,
+      has_critical_tech_error: false,
+      suggested_rating: rating,
+      verdict,
+      matched_points: matched,
+      missing_vs_note: missing,
+      tech_corrections: [],
+      interview_supplement: '',
+      rubric_concepts: rubric,
+    };
+  }
+
+  function _buildFlashcardGeminiPromptJS(payload) {
+    return (
+      'You are a Senior Industrial Automation & Electronics Engineer (Siemens TIA Portal S7-1200/1500, VFD/IGBT/PCBA repair, Modbus/Profinet/CANopen/EtherCAT).\n' +
+      'Evaluate the learner\'s Vietnamese/English technical recall answer on TWO INDEPENDENT TIERS:\n' +
+      '1. note_match_score (0-100): How well the user\'s answer matches the key points of reference_answer (their personal note), including minor typos/phrasing differences.\n' +
+      '2. tech_accuracy_score (0-100): Objective real-world industrial engineering accuracy (even if the personal note is brief/incomplete, recognize valid engineering facts and strictly flag real technical misconceptions).\n' +
+      'Rules:\n' +
+      '- Set has_critical_tech_error=true ONLY if the user states a dangerous/wrong engineering fact.\n' +
+      '- suggested_rating MUST follow: "forgot" if has_critical_tech_error or overall_score < 60; "fuzzy" if 60 <= overall_score < 85; "solid" if overall_score >= 85.\n' +
+      '- Return ONLY valid JSON (Vietnamese text):\n' +
+      '{\n' +
+      '  "note_match_score": 0,\n' +
+      '  "tech_accuracy_score": 0,\n' +
+      '  "overall_score": 0,\n' +
+      '  "has_critical_tech_error": false,\n' +
+      '  "suggested_rating": "forgot|fuzzy|solid",\n' +
+      '  "verdict": "Nhận xét ngắn gọn 1 câu bằng tiếng Việt",\n' +
+      '  "matched_points": ["Ý đã trả lời đúng 1"],\n' +
+      '  "missing_vs_note": ["Ý thiếu so với ghi chú gốc hoặc lỗi diễn đạt/gõ nhầm"],\n' +
+      '  "tech_corrections": ["Điểm chưa chuẩn về mặt kỹ thuật thực tế (để mảng rỗng [] nếu đã chuẩn)"],\n' +
+      '  "interview_supplement": "1-2 câu kiến thức gốc/chuẩn phỏng vấn thực chiến nên bổ sung vào sổ tay (để trống nếu ghi chú đã đầy đủ)",\n' +
+      '  "rubric_concepts": [{"label": "Cụm ý lõi 2-5 từ", "hit": true}]\n' +
+      '}\n\n' +
+      `Item Kind: ${payload.item_kind || ''} | ID: ${payload.item_id || ''}\n` +
+      `Record Title: ${payload.record_title || ''}\n` +
+      `Section Title: ${payload.section_title || ''}\n` +
+      `Question:\n${payload.question || ''}\n\n` +
+      `Personal Reference Note:\n${payload.reference_answer || ''}\n\n` +
+      `User Answer:\n${payload.user_answer || ''}`
+    );
+  }
+
+  function _normalizeGeminiFlashcardEval(aiOut, offlineRes) {
+    const clamp = (v, defVal) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : defVal;
+    };
+    const noteSc = clamp(aiOut.note_match_score, offlineRes.note_match_score);
+    const techSc = clamp(aiOut.tech_accuracy_score, noteSc);
+    const hasCrit = Boolean(aiOut.has_critical_tech_error);
+    let overall = clamp(aiOut.overall_score, Math.round(noteSc * 0.55 + techSc * 0.45));
+    if (hasCrit && overall >= 60) overall = Math.min(overall, 55);
+    const rating = _fcComputeRating(overall, hasCrit);
+    const strArr = (v) => (Array.isArray(v) ? v.map((x) => String(x || '').trim()).filter(Boolean).slice(0, 6) : []);
+    let rubric = [];
+    if (Array.isArray(aiOut.rubric_concepts)) {
+      rubric = aiOut.rubric_concepts
+        .filter((r) => r && String(r.label || '').trim())
+        .slice(0, 6)
+        .map((r) => ({ label: String(r.label).trim(), hit: Boolean(r.hit) }));
+    }
+    if (!rubric.length) rubric = offlineRes.rubric_concepts;
+
+    return {
+      engine: 'gemini',
+      note_match_score: noteSc,
+      tech_accuracy_score: techSc,
+      overall_score: overall,
+      has_critical_tech_error: hasCrit,
+      suggested_rating: rating,
+      verdict: String(aiOut.verdict || offlineRes.verdict).trim(),
+      matched_points: strArr(aiOut.matched_points).length ? strArr(aiOut.matched_points) : offlineRes.matched_points,
+      missing_vs_note: strArr(aiOut.missing_vs_note),
+      tech_corrections: strArr(aiOut.tech_corrections),
+      interview_supplement: String(aiOut.interview_supplement || '').trim(),
+      rubric_concepts: rubric,
+    };
+  }
+
+  function buildFlashcardFollowUpOfflineJS(itemKind, recordTitle, question, referenceAnswer) {
+    const kind = String(itemKind || '').trim().toLowerCase();
+    const title = String(recordTitle || 'thiết bị/khối này').trim();
+    const refNorm = _fcStripAccents(referenceAnswer);
+
+    if (kind === 'repair') {
+      return {
+        engine: 'offline',
+        focus_tag: 'ĐO NGUỘI & CÔ LẬP LỖI',
+        followup_question: `Khi sửa ca "${title}", trước khi đóng nguồn AC/DC bus, bạn đo nguội những điểm nào để cô lập lỗi và tránh nổ linh kiện thay mới?`,
+        model_answer:
+          '1. Đo diode/thông mạch 2 chiều trên cầu chỉnh lưu, DC bus (+)/(-) và 6 nhánh IGBT/MOSFET để loại trừ chập công suất.\n' +
+          '2. Tháo/cách ly tải hoặc IC công suất, cấp nguồn nuôi thấp dòng (qua bóng đèn nối tiếp/nguồn giới hạn dòng) đo kiểm nguồn xung SMPS và xung kích Gate (+15V / -8V).\n' +
+          '3. Kiểm tra lại điện trở Gate, optocoupler (như A3120) và mạch hồi tiếp dòng/áp trước khi lắp lại công suất.',
+      };
+    }
+    if (kind === 'plc') {
+      if (refNorm.includes('ob') || refNorm.includes('scan') || refNorm.includes('vong quet')) {
+        return {
+          engine: 'offline',
+          focus_tag: 'SCAN CYCLE & AN TOÀN CPU',
+          followup_question: `Trong "${title}", nếu thời gian xử lý tăng đột biến vượt Watchdog hoặc xảy ra lỗi phần cứng/I/O, CPU S7-1200/1500 phản ứng ra sao và cần xử lý thế nào để không dừng dây chuyền ngoài ý muốn?`,
+          model_answer:
+            '1. Nếu vượt chu kỳ Watchdog (mặc định ~150ms) hoặc mất module/rack mà không có OB lỗi tương ứng (như OB80, OB82, OB86), CPU sẽ chuyển sang STOP.\n' +
+            '2. Cần tách tác vụ chu kỳ chuẩn sang Cyclic Interrupt (OB30) và cài các OB chẩn đoán/ngắt lỗi để ghi nhận cảnh báo an toàn.\n' +
+            '3. Tránh vòng lặp WHILE/FOR không giới hạn bên trong OB1 hoặc FB chính để giữ scan cycle ổn định.',
+        };
+      }
+      return {
+        engine: 'offline',
+        focus_tag: 'INSTANCE DB & BẢO TRÌ PLC',
+        followup_question: `Với "${title}", khi gọi lại nhiều lần cho nhiều động cơ/trạm hoặc khi download sửa đổi logic online, cần chú ý gì về vùng nhớ/Instance DB để tránh xung đột dữ liệu?`,
+        model_answer:
+          '1. Mỗi đối tượng độc lập dùng FB phải gán Instance DB riêng (hoặc Multi-instance trong FB cha) để không bị ghi đè biến Static (Timer/Edge trigger).\n' +
+          '2. Dùng FC cho hàm tính toán không nhớ (stateless) và đặt biến tạm trong Temp phải luôn gán giá trị trước khi đọc.\n' +
+          '3. Tránh thay đổi cấu trúc giao diện (Interface/Static) của DB đang chạy nếu không muốn bị reinitialize giá trị vận hành.',
+      };
+    }
+    if (kind === 'network') {
+      return {
+        engine: 'offline',
+        focus_tag: 'CHẨN ĐOÁN NHIỄU & TIMEOUT',
+        followup_question: `Khi triển khai "${title}" ngoài tủ điện công nghiệp nhiều biến tần, nếu xuất hiện rớt gói ngẫu nhiên (timeout/CRC error), bạn kiểm tra lớp vật lý và tham số theo thứ tự nào?`,
+        model_answer:
+          '1. Lớp vật lý: kiểm tra cáp bọc chống nhiễu STP nối mass 1 đầu, đúng cực tính A+/B- hoặc CAN_H/CAN_L (hoặc chiều IN/OUT của EtherCAT) và điện trở đầu cuối 120Ω ở đúng 2 đầu tuyến.\n' +
+          '2. Tham số truyền thông: đối chiếu đồng bộ Baudrate, Parity/Stop bit, Node ID không trùng lặp và chu kỳ polling/watchdog.\n' +
+          '3. Khoanh vùng nhiễu: tách cáp tín hiệu khỏi cáp động lực 3 pha biến tần tối thiểu 20-30cm và kiểm tra bộ đếm lỗi/working counter.',
+      };
+    }
+    return {
+      engine: 'offline',
+      focus_tag: 'PHẢN BIỆN NGUYÊN LÝ',
+      followup_question: `Trong chủ đề "${title}", nếu bỏ qua hoặc làm sai bước cốt lõi trong ghi chú thì hậu quả kỹ thuật trực tiếp trên mạch / hệ thống là gì?`,
+      model_answer:
+        '1. Xác định điểm lỗi phát sinh ở tầng nguồn, tầng điều khiển hay tầng cách ly/tín hiệu hồi tiếp.\n' +
+        '2. Luôn đối chiếu thông số đo thực tế (điện áp DC/AC, dạng sóng, trở kháng) với ngưỡng datasheet trước khi cấp tải.\n' +
+        '3. Ghi nhận nguyên nhân gốc rễ để không chỉ sửa phần ngọn (chết lặp lại linh kiện mới thay).',
+    };
+  }
+
+  function _buildFlashcardFollowUpGeminiPromptJS(payload) {
+    return (
+      'You are a Senior Industrial Automation & Electronics Engineer interviewing a candidate.\n' +
+      'Based on the flashcard below, generate ONE sharp follow-up interview question probing real-world failure modes, diagnostics, safety, or architecture, plus a concise 3-4 line model answer.\n' +
+      'Return ONLY valid JSON in Vietnamese:\n' +
+      '{\n' +
+      '  "focus_tag": "SHORT UPPERCASE TOPIC TAG (2-4 WORDS)",\n' +
+      '  "followup_question": "1 câu hỏi xoáy thực chiến sắc bén bằng tiếng Việt",\n' +
+      '  "model_answer": "Đáp án chuẩn 3-4 dòng súc tích, đúng kỹ thuật công nghiệp"\n' +
+      '}\n\n' +
+      `Item Kind: ${payload.item_kind || ''} | Title: ${payload.record_title || ''}\n` +
+      `Original Question: ${payload.question || ''}\n` +
+      `Reference Note: ${payload.reference_answer || ''}\n` +
+      `User Answer: ${payload.user_answer || ''}`
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -1428,6 +1802,35 @@
         await saveLocalSnapshot(snap);
         return _jsonResponse({ reset: true });
       }
+    }
+    if (p === '/api/flashcards/evaluate-answer' && m === 'POST') {
+      const offlineRes = evaluateFlashcardOfflineJS(body.reference_answer || '', body.user_answer || '');
+      const mode = String(body.mode || 'auto').trim().toLowerCase();
+      if (mode !== 'offline' && String(body.user_answer || '').trim()) {
+        const aiOut = await _callGeminiJsonDirect(_buildFlashcardGeminiPromptJS(body), body.api_key || '');
+        if (aiOut && typeof aiOut === 'object' && ('overall_score' in aiOut || 'note_match_score' in aiOut || 'verdict' in aiOut)) {
+          return _jsonResponse(_normalizeGeminiFlashcardEval(aiOut, offlineRes));
+        }
+      }
+      return _jsonResponse(offlineRes);
+    }
+    if (p === '/api/flashcards/follow-up' && m === 'POST') {
+      const offlineRes = buildFlashcardFollowUpOfflineJS(
+        body.item_kind || '',
+        body.record_title || '',
+        body.question || '',
+        body.reference_answer || ''
+      );
+      const aiOut = await _callGeminiJsonDirect(_buildFlashcardFollowUpGeminiPromptJS(body), body.api_key || '');
+      if (aiOut && typeof aiOut === 'object' && String(aiOut.followup_question || '').trim()) {
+        return _jsonResponse({
+          engine: 'gemini',
+          focus_tag: String(aiOut.focus_tag || offlineRes.focus_tag).trim(),
+          followup_question: String(aiOut.followup_question).trim(),
+          model_answer: String(aiOut.model_answer || offlineRes.model_answer).trim(),
+        });
+      }
+      return _jsonResponse(offlineRes);
     }
     match = p.match(/^\/api\/workspace-categories\/([^/]+)\/reset$/);
     if (match && m === 'POST') {
@@ -2547,6 +2950,8 @@
     saveAiConfig,
     checkOtaUpdate,
     utcNowIso,
+    evaluateFlashcardOffline: evaluateFlashcardOfflineJS,
+    followUpFlashcardOffline: buildFlashcardFollowUpOfflineJS,
   };
 
   window.MRLSyncEngine = {
