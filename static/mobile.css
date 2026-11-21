@@ -2612,6 +2612,8 @@
   .cc-table tbody td {
     display: block !important;
     padding: 0 !important;
+    border-right: 0 !important;
+    background: transparent !important;
   }
   .cc-td-item {
     order: 1 !important;
