@@ -3785,47 +3785,72 @@ tr.cc-st-suspect > td:first-child {
 }
 
 /* Click-to-Edit & Inline Editor */
-.rep-editable {
+.rep-editable,
+.uni-editable,
+.uni-editable-title,
+.uni-editable-block {
   position: relative;
   cursor: text;
   border-radius: var(--r);
   transition: background-color 0.14s ease, box-shadow 0.14s ease;
 }
 .cold-check-body.rep-editable,
-.warn-body.rep-editable {
+.warn-body.rep-editable,
+.warn-body.uni-editable,
+.nb-body.uni-editable {
   padding: 4px 6px;
   margin: -4px -6px;
 }
-.rep-editable:hover {
+.rep-editable:hover,
+.uni-editable:hover,
+.uni-editable-title:hover,
+.uni-editable-block:hover {
   background: rgba(245, 158, 11, 0.05);
   box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.35);
+}
+.uni-inline-editing {
+  padding: 0 !important;
+  margin: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+.uni-inline-editor {
+  width: 100%;
+}
+.uni-inline-inp,
+.uni-inline-ta {
+  width: 100%;
+  font-size: 13.5px;
+  line-height: 1.58;
+  padding: 6px 9px;
+  border-color: var(--amber);
+  background: var(--bg);
+  color: var(--text);
+}
+.d-title .uni-inline-inp {
+  font-size: 17px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+.uni-inline-ta {
+  min-height: 60px;
+  resize: vertical;
+}
+.uni-ph {
+  color: var(--text-3) !important;
+  font-style: italic;
+  font-weight: 400 !important;
+}
+.sop-row input[type="checkbox"],
+.sop-num {
+  cursor: pointer;
+}
+.sop-txt {
+  cursor: text;
 }
 .cold-check-body.rep-editable:hover {
   background: rgba(56, 189, 248, 0.06);
   box-shadow: inset 0 0 0 1px rgba(56, 189, 248, 0.42);
-}
-.rep-editable::after {
-  content: 'Click để sửa';
-  position: absolute;
-  top: 5px;
-  right: 8px;
-  padding: 1px 6px;
-  border-radius: 2px;
-  background: var(--panel-2);
-  border: 1px solid var(--line-strong);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  font-weight: 500;
-  color: var(--text-3);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.14s ease;
-}
-html[data-lang="en"] .rep-editable::after {
-  content: 'Click to edit';
-}
-.rep-editable:hover::after {
-  opacity: 0.92;
 }
 
 .rep-inline-editor {
@@ -3979,18 +4004,16 @@ html[data-theme="light"] .rep-modal-cc-row.cc-st-suspect {
 html[data-theme="light"] .rep-cold-bar .rep-collapsed-trigger:hover {
   color: #0284C7;
 }
-html[data-theme="light"] .rep-editable:hover {
+html[data-theme="light"] .rep-editable:hover,
+html[data-theme="light"] .uni-editable:hover,
+html[data-theme="light"] .uni-editable-title:hover,
+html[data-theme="light"] .uni-editable-block:hover {
   background: rgba(217, 119, 6, 0.06);
   box-shadow: inset 0 0 0 1px rgba(217, 119, 6, 0.38);
 }
 html[data-theme="light"] .cold-check-body.rep-editable:hover {
   background: rgba(2, 132, 199, 0.07);
   box-shadow: inset 0 0 0 1px rgba(2, 132, 199, 0.42);
-}
-html[data-theme="light"] .rep-editable::after {
-  background: #FFFFFF;
-  border-color: #CBD5E1;
-  color: #475569;
 }
 html[data-theme="light"] .tag-add-fault:hover {
   color: #B91C1C;

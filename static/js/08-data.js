@@ -15,6 +15,7 @@ async function quickUpdateStatus(parentType, id, statusCode) {
     network: 'networkNotes',
   };
   const url = endpointMap[parentType];
+  if (typeof flushUniFieldEdit === 'function') await flushUniFieldEdit();
   if (state.inlineSectionEdit) await _flushInlineSectionOnLeave(false);
   if (parentType === 'repair' && typeof flushActiveRepairInlineEdit === 'function') await flushActiveRepairInlineEdit();
   try {
@@ -43,6 +44,10 @@ async function deleteRecord(parentType, id) {
   if (state.inlineSectionEdit && state.inlineSectionEdit.kind === parentType && state.inlineSectionEdit.id === id) {
     clearTimeout(_inlineSecSaveTimer);
     state.inlineSectionEdit = null;
+  }
+  if (state.uniInlineEdit && state.uniInlineEdit.kind === parentType && state.uniInlineEdit.id === id) {
+    state.uniInlineEdit.cancelling = true;
+    state.uniInlineEdit = null;
   }
   if (parentType === 'repair') {
     if (state.repairInlineEdit && state.repairInlineEdit.caseId === id) {
@@ -415,6 +420,7 @@ function suggestModalDrillQa(kind) {
 }
 
 function openKnowledgeModal(itemId = null) {
+  if (typeof flushUniFieldEdit === 'function') flushUniFieldEdit();
   if (state.inlineSectionEdit) _flushInlineSectionOnLeave(true);
   const modal = document.getElementById('knowledge-modal');
   const title = document.getElementById('knowledge-modal-title').querySelector('span');
@@ -498,6 +504,7 @@ function addPlcPinRow(rowData = { pin: '', dir: 'IN', dtype: 'Bool', desc: '' })
 }
 
 function openPlcModal(noteId = null) {
+  if (typeof flushUniFieldEdit === 'function') flushUniFieldEdit();
   if (state.inlineSectionEdit) _flushInlineSectionOnLeave(true);
   const modal = document.getElementById('plc-modal');
   const title = document.getElementById('plc-modal-title').querySelector('span');
@@ -600,6 +607,7 @@ function addNetRegRow(rowData = { name: '', address_hex: '', address_dec: '', va
 }
 
 function openNetworkModal(noteId = null) {
+  if (typeof flushUniFieldEdit === 'function') flushUniFieldEdit();
   if (state.inlineSectionEdit) _flushInlineSectionOnLeave(true);
   const modal = document.getElementById('network-modal');
   const title = document.getElementById('network-modal-title').querySelector('span');

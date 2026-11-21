@@ -2565,6 +2565,8 @@
   .cc-status-pill,
   .cc-inline-inp,
   .cc-inline-ta,
+  .uni-inline-inp,
+  .uni-inline-ta,
   .rep-cc-item-inp,
   .rep-cc-res-inp,
   .rep-collapsed-trigger,
@@ -2676,7 +2678,9 @@
     font-size: 17px !important;
   }
   .cc-inline-inp,
-  .cc-inline-ta {
+  .cc-inline-ta,
+  .uni-inline-inp,
+  .uni-inline-ta {
     font-size: 14.5px !important;
     padding: 7px 9px !important;
   }

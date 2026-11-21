@@ -89,6 +89,7 @@ const state = {
   scratchpads: {},
   reviewProgress: {},
   inlineSectionEdit: null,
+  uniInlineEdit: null,
   repairInlineEdit: null,
   repairTagAdd: null,
   repairDraftSteps: {},

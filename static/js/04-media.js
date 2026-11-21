@@ -450,6 +450,10 @@ function _replaceRecordInState(kind, saved) {
 }
 
 function _rerenderInlineHost(kind, id, pane, skipSamePane = false) {
+  const paneIdMap = { plc: 'plc-detail', network: 'network-detail', knowledge: 'knowledge-detail' };
+  const detailEl = paneIdMap[kind] ? document.getElementById(paneIdMap[kind]) : null;
+  const savedScroll = detailEl ? detailEl.scrollTop : 0;
+
   if (!(skipSamePane && pane === 'primary')) {
     if (kind === 'plc' && state.selectedPlcId === id) {
       const filtered = getFilteredPlcNotes();
@@ -464,10 +468,14 @@ function _rerenderInlineHost(kind, id, pane, skipSamePane = false) {
       const idx = Math.max(0, filtered.findIndex((k) => k.id === id));
       if (filtered[idx]) renderKnowledgeDetail(filtered[idx], idx, filtered.length);
     }
+    if (detailEl) detailEl.scrollTop = savedScroll;
   }
   if (!(skipSamePane && pane === 'secondary')) {
     if (state.splitMode && state.pane2?.group === kind && state.pane2?.id === id) {
+      const p2El = document.getElementById('pane2-content');
+      const p2Scroll = p2El ? p2El.scrollTop : 0;
       renderPane2();
+      if (p2El) p2El.scrollTop = p2Scroll;
     }
   }
 }
@@ -577,7 +585,41 @@ async function _flushInlineSectionOnLeave(rerender = false) {
   }
 }
 
-async function openInlineSectionEditor(kind, id, idx, pane = 'primary') {
+function canTriggerInlineEdit(event) {
+  if (!event) return true;
+  if (event.target && event.target.closest('button, a, input, textarea, select, .itag, .detail-floating-img, .bilingual-sec-wrap, .rep-inline-editor, #inline-sec-editor-box, .uni-inline-editor')) {
+    return false;
+  }
+  const sel = typeof window.getSelection === 'function' ? window.getSelection() : null;
+  if (sel && sel.toString().trim().length > 0) return false;
+  return true;
+}
+
+function onCustomSectionClickEdit(event, kind, id, idx, pane = 'primary', focusTarget = 'content') {
+  if (!canTriggerInlineEdit(event)) return;
+  openInlineSectionEditor(kind, id, idx, pane, focusTarget);
+}
+
+let _inlineSecOutsideBound = false;
+function _ensureInlineSectionOutsideClickBinding() {
+  if (_inlineSecOutsideBound) return;
+  _inlineSecOutsideBound = true;
+  document.addEventListener('mousedown', (ev) => {
+    const ed = state.inlineSectionEdit;
+    if (!ed || ed.saving) return;
+    const t = ev.target;
+    if (!t || !t.closest) return;
+    if (t.closest('#inline-sec-editor-box, .overlay:not(.hidden), #ctx-menu, #en-selection-popover, #toast-container')) return;
+    if (t.id === 'canvas-image-file-input') return;
+    if (t.closest('[data-inline-sec-trigger="1"], [data-uni-edit="1"], [data-cc-field], .rep-editable')) return;
+    finishInlineSectionEdit(true);
+  });
+}
+
+async function openInlineSectionEditor(kind, id, idx, pane = 'primary', focusTarget = 'content') {
+  if (typeof flushUniFieldEdit === 'function' && state.uniInlineEdit) {
+    await flushUniFieldEdit();
+  }
   if (state.inlineSectionEdit) {
     const cur = state.inlineSectionEdit;
     if (cur.kind === kind && cur.id === id && cur.idx === idx && cur.pane === pane) return;
@@ -587,6 +629,7 @@ async function openInlineSectionEditor(kind, id, idx, pane = 'primary') {
   if (!rec) return;
   const secs = _getEditableSectionsForRecord(kind, rec);
   if (idx < 0 || idx >= secs.length) return;
+  _ensureInlineSectionOutsideClickBinding();
   state.inlineSectionEdit = {
     kind,
     id,
@@ -598,18 +641,22 @@ async function openInlineSectionEditor(kind, id, idx, pane = 'primary') {
     dirty: false,
     mutated: false,
     saving: false,
-    focusTarget: 'content',
+    focusTarget: focusTarget || 'content',
   };
   _rerenderInlineHost(kind, id, pane, false);
 }
 
 async function addInlineNewSection(kind, id, pane = 'primary') {
+  if (typeof flushUniFieldEdit === 'function' && state.uniInlineEdit) {
+    await flushUniFieldEdit();
+  }
   if (state.inlineSectionEdit) {
     await _flushInlineSectionOnLeave(false);
   }
   const rec = _findRecordByKindId(kind, id);
   if (!rec) return;
   const secs = _getEditableSectionsForRecord(kind, rec);
+  _ensureInlineSectionOutsideClickBinding();
   const newDraft = { id: `sec-${secs.length + 1}`, title: '', style: 'info', content: '', images: [] };
   state.inlineSectionEdit = {
     kind,
@@ -627,7 +674,7 @@ async function addInlineNewSection(kind, id, pane = 'primary') {
   _rerenderInlineHost(kind, id, pane, false);
 }
 
-async function finishInlineSectionEdit() {
+async function finishInlineSectionEdit(silent = false) {
   clearTimeout(_inlineSecSaveTimer);
   const ed = state.inlineSectionEdit;
   if (!ed) return;
@@ -643,7 +690,7 @@ async function finishInlineSectionEdit() {
   const { kind, id, pane } = ed;
   state.inlineSectionEdit = null;
   _rerenderInlineHost(kind, id, pane, false);
-  showToast('Đã lưu & hoàn tất chỉnh sửa mục', 'success');
+  if (!silent) showToast('Đã lưu & hoàn tất chỉnh sửa mục', 'success');
 }
 
 async function cancelInlineSectionEdit() {
@@ -735,18 +782,44 @@ function _hydrateInlineSectionEditor(rootEl) {
     _inlineSecSaveTimer = setTimeout(() => saveInlineSectionNow(false), 650);
   };
 
+  const autoResizeSecTa = () => {
+    if (!contentTa) return;
+    contentTa.style.height = 'auto';
+    contentTa.style.height = `${Math.max(120, contentTa.scrollHeight + 6)}px`;
+  };
+  autoResizeSecTa();
+
   titleInp.addEventListener('input', markDirty);
+  titleInp.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      cancelInlineSectionEdit();
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      finishInlineSectionEdit(true);
+    }
+  });
   styleSel.addEventListener('change', () => {
     box.dataset.style = styleSel.value;
     ed.draft.style = styleSel.value;
     ed.dirty = true;
     saveInlineSectionNow(false);
   });
-  contentTa.addEventListener('input', markDirty);
+  contentTa.addEventListener('input', () => {
+    autoResizeSecTa();
+    markDirty();
+  });
   contentTa.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      cancelInlineSectionEdit();
+      return;
+    }
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
-      finishInlineSectionEdit();
+      finishInlineSectionEdit(true);
     }
   });
 
@@ -857,21 +930,28 @@ function renderCustomSectionsHtml(sections = [], prefixKey = 'sec', highlightTag
       return `<div class="detail-floating-img" style="left:${ix}px; top:${Math.round(im.y || 0)}px; width:${Math.round(im.width || 280)}px; max-width:calc(100% - ${ix + 8}px); height:${Math.round(im.height || 180)}px;" onclick="openLightbox('${escapeHtml(resolvedUrl)}', '${escapeHtml(title)}')"><img src="${escapeHtml(resolvedUrl)}" alt="${escapeHtml(title)}" /></div>`;
     }).join('');
 
-    const editCall = inlineOpts
-      ? `openInlineSectionEditor('${escapeHtml(inlineOpts.kind)}', '${escapeHtml(inlineOpts.id)}', ${idx}, '${escapeHtml(inlineOpts.pane)}')`
+    const titleTriggerCall = inlineOpts
+      ? `onCustomSectionClickEdit(event, '${escapeHtml(inlineOpts.kind)}', '${escapeHtml(inlineOpts.id)}', ${idx}, '${escapeHtml(inlineOpts.pane)}', 'title')"`
       : '';
-    const editBtnHtml = inlineOpts
-      ? `<button type="button" class="btn btn-sm sec-inline-edit-btn" onclick="${editCall}" title="Viết / chỉnh sửa trực tiếp mục này">✎ Viết / Sửa</button>`
+    const contentTriggerCall = inlineOpts
+      ? `onCustomSectionClickEdit(event, '${escapeHtml(inlineOpts.kind)}', '${escapeHtml(inlineOpts.id)}', ${idx}, '${escapeHtml(inlineOpts.pane)}', 'content')"`
       : '';
-    const headOpsHtml = (biBtnHtml || editBtnHtml)
-      ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">${biBtnHtml}${editBtnHtml}</div>`
+    const titleAttrs = inlineOpts
+      ? `class="uni-editable-title" data-inline-sec-trigger="1" onclick="${titleTriggerCall}"`
+      : '';
+    const headOpsHtml = biBtnHtml
+      ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">${biBtnHtml}</div>`
       : '';
 
     const emptyHtml = inlineOpts
-      ? `<div class="inline-empty-prompt" onclick="${editCall}">+ Mục này đang trống — bấm vào đây để viết hoặc dán ảnh (Ctrl+V) ngay...</div>`
+      ? `<div class="inline-empty-prompt">+ Mục này đang trống — chạm vào đây để viết hoặc dán ảnh (Ctrl+V) ngay...</div>`
       : '<span style="color:var(--text-3);">— Trống —</span>';
 
-    const innerBox = `<div class="detail-canvas-box"${minH ? ` style="min-height:${Math.ceil(minH)}px;"` : ''}><div class="detail-canvas-text">${content ? fmt(content) : (imgs.length ? '' : emptyHtml)}</div>${imgsHtml}</div>${biPanelHtml}`;
+    const boxAttrs = inlineOpts
+      ? `class="detail-canvas-box uni-editable-block" data-inline-sec-trigger="1" onclick="${contentTriggerCall}"`
+      : `class="detail-canvas-box"`;
+
+    const innerBox = `<div ${boxAttrs}${minH ? ` style="min-height:${Math.ceil(minH)}px;"` : ''}><div class="detail-canvas-text">${content ? fmt(content) : (imgs.length ? '' : emptyHtml)}</div>${imgsHtml}</div>${biPanelHtml}`;
 
     if (style === 'code') {
       const bufKey = `${prefixKey}:${idx}`;
@@ -880,14 +960,13 @@ function renderCustomSectionsHtml(sections = [], prefixKey = 'sec', highlightTag
         <div class="sec">
           <div class="code-box">
             <div class="code-head">
-              <span style="color:var(--amber);font-weight:700;">${escapeHtml(title)}</span>
+              <span style="color:var(--amber);font-weight:700;" ${titleAttrs}>${escapeHtml(title)}</span>
               <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                 <button type="button" class="btn btn-sm" onclick="copyCodeBlock(this, '${escapeHtml(bufKey)}')">Copy</button>
                 ${biBtnHtml}
-                ${editBtnHtml}
               </div>
             </div>
-            <div class="detail-canvas-box" ${minH ? `style="min-height:${Math.ceil(minH)}px;"` : ''}>
+            <div ${boxAttrs} ${minH ? `style="min-height:${Math.ceil(minH)}px;"` : ''}>
               ${content ? `<pre class="code-pre">${escapeHtml(content)}</pre>` : (imgs.length ? '' : `<div style="padding:12px 14px;">${emptyHtml}</div>`)}
               ${imgsHtml}
             </div>
@@ -896,15 +975,15 @@ function renderCustomSectionsHtml(sections = [], prefixKey = 'sec', highlightTag
         </div>`;
     }
     if (style === 'warn') {
-      return `<div class="sec"><div class="warn"><div class="warn-title sec-title-row"><span>${escapeHtml(title)}</span>${headOpsHtml}</div><div class="warn-body">${innerBox}</div></div></div>`;
+      return `<div class="sec"><div class="warn"><div class="warn-title sec-title-row"><span ${titleAttrs}>${escapeHtml(title)}</span>${headOpsHtml}</div><div class="warn-body">${innerBox}</div></div></div>`;
     }
     if (style === 'pitfall') {
-      return `<div class="sec"><div class="pitfall-block"><div class="nb-title sec-title-row"><span>${escapeHtml(title)}</span>${headOpsHtml}</div><div class="nb-body">${innerBox}</div></div></div>`;
+      return `<div class="sec"><div class="pitfall-block"><div class="nb-title sec-title-row"><span ${titleAttrs}>${escapeHtml(title)}</span>${headOpsHtml}</div><div class="nb-body">${innerBox}</div></div></div>`;
     }
     if (style === 'qa') {
-      return `<div class="sec"><div class="qa-block"><div class="nb-title sec-title-row"><span>${escapeHtml(title)}</span>${headOpsHtml}</div><div class="nb-body">${innerBox}</div></div></div>`;
+      return `<div class="sec"><div class="qa-block"><div class="nb-title sec-title-row"><span ${titleAttrs}>${escapeHtml(title)}</span>${headOpsHtml}</div><div class="nb-body">${innerBox}</div></div></div>`;
     }
-    return `<div class="sec"><div class="note-block accent"><div class="nb-title sec-title-row"><span>${escapeHtml(title)}</span>${headOpsHtml}</div><div class="nb-body">${innerBox}</div></div></div>`;
+    return `<div class="sec"><div class="note-block accent"><div class="nb-title sec-title-row"><span ${titleAttrs}>${escapeHtml(title)}</span>${headOpsHtml}</div><div class="nb-body">${innerBox}</div></div></div>`;
   }).join('');
 
   const addBarHtml = inlineOpts && !hasDraftNew
@@ -1049,5 +1128,400 @@ async function clearScratchpad() {
   document.getElementById('scratchpad-textarea').value = '';
   renderScratchpadView();
   await saveScratchpadNow(true);
+}
+
+// ===========================================================================
+// Universal Click-to-Edit Engine (Knowledge & SOP · PLC/Net Titles · English)
+// ===========================================================================
+function _getUniRecord(kind, id) {
+  if (kind === 'knowledge') return (state.knowledgeItems || []).find((x) => x.id === id) || null;
+  if (kind === 'plc') return (state.plcNotes || []).find((x) => x.id === id) || null;
+  if (kind === 'network') return (state.networkNotes || []).find((x) => x.id === id) || null;
+  if (kind === 'english_card') return (state.englishCards || []).find((x) => String(x.id) === String(id)) || null;
+  return null;
+}
+
+function _uniRenderHostDisplay(kind, rec, field, hostEl) {
+  if (!hostEl || !rec) return;
+  const isEn = state.appLang === 'en';
+  delete hostEl.dataset.viHtmlOrig;
+  delete hostEl.dataset.viTextOrig;
+  hostEl.classList.remove('uni-inline-editing');
+  hostEl.classList.add('uni-editable');
+
+  if (kind === 'knowledge') {
+    if (field === 'topic_model') {
+      hostEl.textContent = rec.topic_model || '';
+      return;
+    }
+    if (field === 'core_concept_workflow' && isSopCategory(rec.category)) {
+      if (typeof renderKnowledgeSopListInnerHtml === 'function') {
+        hostEl.innerHTML = renderKnowledgeSopListInnerHtml(rec, true);
+        const sopCountEl = hostEl.closest('.sec')?.querySelector('.sop-count');
+        if (sopCountEl && typeof parseSopSteps === 'function') {
+          const steps = parseSopSteps(rec.core_concept_workflow);
+          const done = steps.filter((_, i) => state.sopChecked[`${rec.id}:${i}`]).length;
+          sopCountEl.textContent = `${done} / ${steps.length} ${isEn ? 'DONE' : 'HOÀN THÀNH'}`;
+        }
+        return;
+      }
+    }
+    const val = String(rec[field] || '').trim();
+    hostEl.innerHTML = val
+      ? highlightTagsHtml(val, rec.component_tags || [])
+      : `<span class="none">${isEn ? '— Empty (click to add) —' : '— Chưa có (chạm để nhập) —'}</span>`;
+    return;
+  }
+
+  if (kind === 'plc') {
+    hostEl.textContent = rec.title || '';
+    return;
+  }
+  if (kind === 'network') {
+    hostEl.textContent = rec.target_device || '';
+    return;
+  }
+  if (kind === 'english_card') {
+    const val = String(rec[field] || '').trim();
+    if (field === 'term') {
+      hostEl.textContent = val || rec.term_or_chunk || '';
+      const speakBtn = hostEl.parentElement?.querySelector('[data-speak]');
+      if (speakBtn) speakBtn.setAttribute('data-speak', hostEl.textContent);
+    } else if (field === 'ipa') {
+      hostEl.textContent = val || '/ipa/';
+      hostEl.classList.toggle('uni-ph', !val);
+    } else if (field === 'collocations') {
+      hostEl.textContent = val || (isEn ? 'Add collocations...' : 'Thêm cụm từ đi kèm...');
+      hostEl.classList.toggle('uni-ph', !val);
+    } else if (field === 'example_en') {
+      hostEl.textContent = val || (isEn ? '— No English example yet —' : '— Chưa có câu ví dụ Tiếng Anh —');
+      hostEl.classList.toggle('uni-ph', !val);
+      const exBtn = hostEl.closest('.note-block')?.querySelector('[data-speak]');
+      if (exBtn) {
+        if (val) exBtn.setAttribute('data-speak', val);
+        exBtn.classList.toggle('hidden', !val);
+      }
+    } else if (field === 'example_vi') {
+      hostEl.textContent = val || (isEn ? '— No Vietnamese translation yet —' : '— Chưa có bản dịch Tiếng Việt —');
+      hostEl.classList.toggle('uni-ph', !val);
+    } else if (field === 'meaning_vi') {
+      hostEl.textContent = val;
+    }
+  }
+}
+
+function _uniSyncListAndChrome(kind, saved) {
+  if (!saved) return;
+  if (kind === 'knowledge') {
+    const row = document.querySelector(`#knowledge-list .row[data-ctx-record-id="${CSS.escape(saved.id)}"]`);
+    const tEl = row?.querySelector('.row-title');
+    if (tEl) {
+      delete tEl.dataset.viHtmlOrig;
+      delete tEl.dataset.viTextOrig;
+      tEl.textContent = String(saved.topic_model || '').replace(/\s*\n+\s*/g, ' — ');
+      tEl.title = saved.topic_model || '';
+    }
+  } else if (kind === 'plc') {
+    const row = document.querySelector(`#plc-list .row[data-ctx-record-id="${CSS.escape(saved.id)}"]`);
+    const tEl = row?.querySelector('.row-title');
+    if (tEl) {
+      delete tEl.dataset.viHtmlOrig;
+      delete tEl.dataset.viTextOrig;
+      tEl.textContent = saved.title || '';
+      tEl.title = saved.title || '';
+    }
+  } else if (kind === 'network') {
+    const row = document.querySelector(`#network-list .row[data-ctx-record-id="${CSS.escape(saved.id)}"]`);
+    const tEl = row?.querySelector('.row-title');
+    if (tEl) {
+      delete tEl.dataset.viHtmlOrig;
+      delete tEl.dataset.viTextOrig;
+      tEl.textContent = saved.target_device || '';
+      tEl.title = saved.target_device || '';
+    }
+  } else if (kind === 'english_card') {
+    const row = document.querySelector(`#en-bank-list .list-row[data-en-card-id="${CSS.escape(String(saved.id))}"]`);
+    if (row) {
+      const tEl = row.querySelector('.row-title');
+      const sEl = row.querySelector('.row-sub');
+      if (tEl) tEl.textContent = saved.term || saved.term_or_chunk || '';
+      if (sEl) sEl.textContent = saved.meaning_vi || '';
+    }
+  }
+
+  const mobIdEl = document.getElementById('mob-detail-id');
+  if (mobIdEl && document.body.classList.contains('mobile-detail-open')) {
+    const hint = String(saved.topic_model || saved.title || saved.target_device || saved.term || '').replace(/\s*\n+\s*/g, ' — ').trim();
+    mobIdEl.textContent = hint ? `${saved.id} · ${hint}` : String(saved.id);
+  }
+  if (typeof syncPrimaryEditorTab === 'function') syncPrimaryEditorTab();
+  if (state.splitMode && state.pane2?.group === kind && state.pane2?.id === saved.id) renderPane2();
+}
+
+async function startUniFieldEdit(kind, id, field, event, opts = {}) {
+  if (!opts.skipGuard && !canTriggerInlineEdit(event)) return;
+  const cur = state.uniInlineEdit;
+  if (cur && cur.kind === kind && String(cur.id) === String(id) && cur.field === field) return;
+  if (state.inlineSectionEdit) await _flushInlineSectionOnLeave(true);
+  if (cur) await commitUniFieldEdit();
+
+  const rec = _getUniRecord(kind, id);
+  const hostEl = event?.currentTarget
+    || document.querySelector(`[data-uni-kind="${CSS.escape(kind)}"][data-uni-id="${CSS.escape(String(id))}"][data-uni-field="${CSS.escape(field)}"]`);
+  if (!rec || !hostEl) return;
+
+  const pane = hostEl.closest('.detail-pane');
+  const savedScroll = pane ? pane.scrollTop : 0;
+  const origValue = String(rec[field] || '');
+  const isEn = state.appLang === 'en';
+
+  delete hostEl.dataset.viHtmlOrig;
+  delete hostEl.dataset.viTextOrig;
+  hostEl.classList.remove('uni-editable', 'uni-ph');
+  hostEl.classList.add('uni-inline-editing');
+
+  state.uniInlineEdit = {
+    kind,
+    id,
+    field,
+    origValue,
+    hostEl,
+    pane,
+    singleLine: Boolean(opts.singleLine),
+    saving: false,
+    cancelling: false,
+    _handledKey: false,
+  };
+
+  if (opts.singleLine) {
+    hostEl.innerHTML = `<div class="uni-inline-editor"><input type="text" class="inp uni-inline-inp" spellcheck="false" placeholder="${escapeHtml(opts.placeholder || (isEn ? 'Enter text...' : 'Nhập nội dung...'))}" /></div>`;
+    const inp = hostEl.querySelector('.uni-inline-inp');
+    inp.value = origValue;
+    inp.focus({ preventScroll: true });
+    try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (_) {}
+    inp.addEventListener('keydown', (e) => {
+      const ed = state.uniInlineEdit;
+      if (!ed || ed.hostEl !== hostEl) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        ed._handledKey = true;
+        cancelUniFieldEdit();
+        return;
+      }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        ed._handledKey = true;
+        commitUniFieldEdit();
+      }
+    });
+    inp.addEventListener('blur', () => {
+      const ed = state.uniInlineEdit;
+      if (!ed || ed.hostEl !== hostEl || ed.cancelling || ed.saving || ed._handledKey) return;
+      commitUniFieldEdit();
+    });
+  } else {
+    hostEl.innerHTML = `<div class="uni-inline-editor"><textarea class="inp uni-inline-ta" rows="2" spellcheck="false" placeholder="${escapeHtml(opts.placeholder || (isEn ? 'Enter content (Ctrl+Enter save, Esc cancel)...' : 'Nhập nội dung (Ctrl+Enter lưu, Esc hủy)...'))}"></textarea></div>`;
+    const ta = hostEl.querySelector('.uni-inline-ta');
+    ta.value = origValue;
+    const resize = () => {
+      ta.style.height = 'auto';
+      ta.style.height = `${Math.max(60, ta.scrollHeight + 4)}px`;
+    };
+    resize();
+    ta.focus({ preventScroll: true });
+    try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (_) {}
+    ta.addEventListener('input', resize);
+    ta.addEventListener('keydown', (e) => {
+      const ed = state.uniInlineEdit;
+      if (!ed || ed.hostEl !== hostEl) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        ed._handledKey = true;
+        cancelUniFieldEdit();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        ed._handledKey = true;
+        commitUniFieldEdit();
+      }
+    });
+    ta.addEventListener('blur', () => {
+      const ed = state.uniInlineEdit;
+      if (!ed || ed.hostEl !== hostEl || ed.cancelling || ed.saving || ed._handledKey) return;
+      commitUniFieldEdit();
+    });
+  }
+
+  if (pane) pane.scrollTop = savedScroll;
+}
+
+function cancelUniFieldEdit() {
+  const ed = state.uniInlineEdit;
+  if (!ed) return false;
+  ed.cancelling = true;
+  state.uniInlineEdit = null;
+  const savedScroll = ed.pane ? ed.pane.scrollTop : 0;
+  const rec = _getUniRecord(ed.kind, ed.id);
+  if (rec) _uniRenderHostDisplay(ed.kind, rec, ed.field, ed.hostEl);
+  if (ed.pane) ed.pane.scrollTop = savedScroll;
+  if (state.appLang === 'en' && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
+  return true;
+}
+
+function flushUniFieldEdit() {
+  if (state.uniInlineEdit) return commitUniFieldEdit();
+  return Promise.resolve();
+}
+
+async function commitUniFieldEdit() {
+  const ed = state.uniInlineEdit;
+  if (!ed || ed.saving || ed.cancelling) return;
+  const inp = ed.hostEl?.querySelector('.uni-inline-inp, .uni-inline-ta');
+  const nextVal = String(inp ? inp.value : '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  const origVal = String(ed.origValue || '').trim();
+  const savedScroll = ed.pane ? ed.pane.scrollTop : 0;
+  const isEn = state.appLang === 'en';
+
+  const requiredMap = {
+    'knowledge:topic_model': isEn ? 'Topic cannot be empty' : 'Chủ đề không được để trống',
+    'plc:title': isEn ? 'Title cannot be empty' : 'Tiêu đề bài PLC không được để trống',
+    'network:target_device': isEn ? 'Target device cannot be empty' : 'Tên thiết bị đích không được để trống',
+    'english_card:term': isEn ? 'Term cannot be empty' : 'Thuật ngữ không được để trống',
+    'english_card:meaning_vi': isEn ? 'Meaning cannot be empty' : 'Nghĩa chuyên ngành không được để trống',
+  };
+  const reqKey = `${ed.kind}:${ed.field}`;
+  if (requiredMap[reqKey] && !nextVal) {
+    showToast(requiredMap[reqKey], 'error');
+    state.uniInlineEdit = null;
+    const rec = _getUniRecord(ed.kind, ed.id);
+    if (rec) _uniRenderHostDisplay(ed.kind, rec, ed.field, ed.hostEl);
+    if (ed.pane) ed.pane.scrollTop = savedScroll;
+    return;
+  }
+
+  state.uniInlineEdit = null;
+  const rec = _getUniRecord(ed.kind, ed.id);
+  if (!rec) return;
+
+  if (nextVal === origVal) {
+    _uniRenderHostDisplay(ed.kind, rec, ed.field, ed.hostEl);
+    if (ed.pane) ed.pane.scrollTop = savedScroll;
+    if (isEn && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
+    return;
+  }
+
+  const prevVal = rec[ed.field];
+  rec[ed.field] = nextVal;
+  _uniRenderHostDisplay(ed.kind, rec, ed.field, ed.hostEl);
+  if (ed.pane) ed.pane.scrollTop = savedScroll;
+
+  try {
+    let url = '';
+    let payload = {};
+    if (ed.kind === 'knowledge') {
+      url = `/api/knowledge-items/${encodeURIComponent(rec.id)}`;
+      payload = {
+        record_date: rec.record_date || null,
+        source_group: rec.source_group || 'Knowledge',
+        topic_model: rec.topic_model || rec.id,
+        category: rec.category || '',
+        key_takeaway: rec.key_takeaway || '',
+        core_concept_workflow: rec.core_concept_workflow || '',
+        why_question: rec.why_question || '',
+        actionable_application: rec.actionable_application || '',
+        note: rec.note || '',
+        status_code: rec.status_code || 'review',
+        component_tags: rec.component_tags || [],
+        custom_sections_json: rec.custom_sections_json || [],
+        drill_qa_json: rec.drill_qa_json || [],
+      };
+    } else if (ed.kind === 'plc') {
+      url = `/api/plc-notes/${encodeURIComponent(rec.id)}`;
+      payload = {
+        record_date: rec.record_date || null,
+        plc_brand_platform: rec.plc_brand_platform || '',
+        category: rec.category || '',
+        title: rec.title || rec.id,
+        core_summary: rec.core_summary || '',
+        pinout_json: rec.pinout_json || [],
+        code_snippet: rec.code_snippet || '',
+        common_pitfalls: rec.common_pitfalls || '',
+        interview_qa: rec.interview_qa || '',
+        status_code: rec.status_code || 'review',
+        tags: rec.tags || [],
+        custom_sections_json: rec.custom_sections_json || [],
+        drill_qa_json: rec.drill_qa_json || [],
+      };
+    } else if (ed.kind === 'network') {
+      url = `/api/network-notes/${encodeURIComponent(rec.id)}`;
+      payload = {
+        record_date: rec.record_date || null,
+        protocol: rec.protocol || 'Modbus RTU/TCP',
+        target_device: rec.target_device || rec.id,
+        physical_wiring: rec.physical_wiring || '',
+        comm_settings: rec.comm_settings || '',
+        register_map_json: rec.register_map_json || [],
+        test_script_code: rec.test_script_code || '',
+        troubleshooting_tips: rec.troubleshooting_tips || '',
+        status_code: rec.status_code || 'review',
+        tags: rec.tags || [],
+        custom_sections_json: rec.custom_sections_json || [],
+        drill_qa_json: rec.drill_qa_json || [],
+      };
+    } else if (ed.kind === 'english_card') {
+      url = `/api/english/cards/${encodeURIComponent(rec.id)}`;
+      payload = {
+        term: rec.term || rec.term_or_chunk || '',
+        ipa: rec.ipa || '',
+        word_class: rec.word_class || 'Noun',
+        category: rec.category || 'PLC & Tự động hóa',
+        meaning_vi: rec.meaning_vi || '',
+        collocations: rec.collocations || '',
+        example_en: rec.example_en || '',
+        example_vi: rec.example_vi || '',
+        linked_record_id: rec.linked_record_id || '',
+        srs_stage: rec.srs_stage || 'new',
+      };
+    }
+
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      throw new Error(e.detail || (isEn ? 'Failed to save changes' : 'Lưu thay đổi thất bại'));
+    }
+    const data = await res.json();
+    let saved = data;
+    if (ed.kind === 'english_card') {
+      if (typeof _applyEnglishCardsResponse === 'function') _applyEnglishCardsResponse(data);
+      saved = data.card || data.item || _getUniRecord('english_card', ed.id) || rec;
+    } else {
+      _replaceRecordInState(ed.kind, data);
+      if (ed.kind === 'knowledge') {
+        const tagsBar = ed.hostEl.closest('.detail-inner')?.querySelector('.d-head .tags');
+        if (tagsBar && typeof renderTagPills === 'function') {
+          tagsBar.innerHTML = renderTagPills(data.component_tags, []) || '<span class="mono" style="font-size:12px;color:var(--text-3);">CHƯA GẮN MÃ</span>';
+        }
+      }
+    }
+    _uniRenderHostDisplay(ed.kind, saved, ed.field, ed.hostEl);
+    _uniSyncListAndChrome(ed.kind, saved);
+    if (ed.pane) ed.pane.scrollTop = savedScroll;
+    if (isEn && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
+    showToast(isEn ? '✓ Saved' : '✓ Đã lưu', 'success');
+  } catch (err) {
+    rec[ed.field] = prevVal;
+    _uniRenderHostDisplay(ed.kind, rec, ed.field, ed.hostEl);
+    if (ed.pane) ed.pane.scrollTop = savedScroll;
+    showToast(err.message, 'error');
+  }
 }
 

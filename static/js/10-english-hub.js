@@ -1484,11 +1484,13 @@ function clearEnBankSearch() {
 }
 
 function selectEnBankItem(cardId) {
+  if (typeof flushUniFieldEdit === 'function') flushUniFieldEdit();
   state.selectedEnglishVocabId = cardId;
   renderEnVocabBankView();
 }
 
 function navigateAdjacentEnVocab(delta) {
+  if (typeof flushUniFieldEdit === 'function') flushUniFieldEdit();
   const items = getFilteredEnVocab();
   if (!items.length) return;
   const curIdx = items.findIndex((x) => String(x.id) === String(state.selectedEnglishVocabId));
@@ -1551,7 +1553,7 @@ function renderEnVocabBankView() {
     const on = String(v.id) === String(state.selectedEnglishVocabId);
     const stCls = v.srs_stage === 'mastered' ? 'mastered' : (v.is_due ? 'researching' : 'review');
     return `
-      <div class="list-row ${on ? 'active' : ''}" onclick="selectEnBankItem('${escapeHtml(String(v.id))}')">
+      <div class="list-row ${on ? 'active' : ''}" data-en-card-id="${escapeHtml(String(v.id))}" onclick="selectEnBankItem('${escapeHtml(String(v.id))}')">
         <div class="row-top">
           <div style="display:flex;align-items:center;gap:6px;">
             <span class="dot dot-${stCls}"></span>
@@ -1570,6 +1572,10 @@ function renderEnVocabBankView() {
   const term = cur.term || cur.term_or_chunk || '';
   const isEn = state.appLang === 'en';
 
+  const cid = escapeHtml(String(cur.id));
+  const uniEnAttr = (field, singleLine = false) =>
+    `data-uni-edit="1" data-uni-kind="english_card" data-uni-id="${cid}" data-uni-field="${field}" onclick="startUniFieldEdit('english_card', '${cid}', '${field}', event, { singleLine: ${singleLine} })"`;
+
   detailEl.innerHTML = `
     <div class="d-toolbar">
       <div style="display:flex;gap:6px;align-items:center;">
@@ -1578,24 +1584,24 @@ function renderEnVocabBankView() {
         <button type="button" class="btn btn-sm" onclick="navigateAdjacentEnVocab(1)">Sau →</button>
       </div>
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
-        <button type="button" class="btn btn-sm btn-indigo" onclick="practiceVocabInCoach('${escapeHtml(String(cur.id))}')">🎤 Thực chiến 1-1</button>
-        <button type="button" class="btn btn-sm" onclick="resetSrsCardFromBank('${escapeHtml(String(cur.id))}')">↺ Reset SRS</button>
-        <button type="button" class="btn btn-sm" onclick="openEnVocabEditorModal('${escapeHtml(String(cur.id))}')">✎ Sửa</button>
-        <button type="button" class="btn btn-sm btn-danger" onclick="deleteEnVocabBankItem('${escapeHtml(String(cur.id))}')">✕ Xóa</button>
+        <button type="button" class="btn btn-sm btn-indigo" onclick="practiceVocabInCoach('${cid}')">🎤 Thực chiến 1-1</button>
+        <button type="button" class="btn btn-sm" onclick="resetSrsCardFromBank('${cid}')">↺ Reset SRS</button>
+        <button type="button" class="btn btn-sm" onclick="openEnVocabEditorModal('${cid}')">✎ Sửa</button>
+        <button type="button" class="btn btn-sm btn-danger" onclick="deleteEnVocabBankItem('${cid}')">✕ Xóa</button>
       </div>
     </div>
 
     <div class="d-head">
       <div class="d-meta">
-        <span class="mono">${escapeHtml(String(cur.id))}</span>
+        <span class="mono">${cid}</span>
         <span>·</span>
         <span class="badge">${escapeHtml(cur.category || '')}</span>
         ${cur.word_class ? `<span class="badge">${escapeHtml(cur.word_class)}</span>` : ''}
         ${cur.linked_record_id ? `<span class="badge mono">Liên kết: ${escapeHtml(cur.linked_record_id)}</span>` : ''}
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;width:100%;">
-        <h2 class="d-title" style="margin:0;">${escapeHtml(term)}</h2>
-        ${cur.ipa ? `<span class="vb-ipa">${escapeHtml(cur.ipa)}</span>` : ''}
+        <h2 class="d-title uni-editable uni-editable-title" style="margin:0;" ${uniEnAttr('term', true)}>${escapeHtml(term)}</h2>
+        <span class="vb-ipa uni-editable ${cur.ipa ? '' : 'uni-ph'}" ${uniEnAttr('ipa', true)}>${escapeHtml(cur.ipa || '/ipa/')}</span>
         <button type="button" class="btn btn-sm" data-speak="${escapeHtml(term)}">🔊 Nghe phát âm</button>
       </div>
     </div>
@@ -1604,19 +1610,19 @@ function renderEnVocabBankView() {
       <section class="note-block">
         <div class="nb-head"><span class="nb-title">NGHĨA CHUYÊN NGÀNH &amp; COLLOCATIONS</span></div>
         <div class="nb-body">
-          <div style="font-size:15px;font-weight:700;color:var(--green);margin-bottom:6px;">${escapeHtml(cur.meaning_vi || '')}</div>
-          ${cur.collocations ? `<div style="font-size:12.5px;"><b>${isEn ? 'Collocations:' : 'Cụm từ hay đi kèm:'}</b> <span class="mono" style="color:#818CF8;">${escapeHtml(cur.collocations)}</span></div>` : ''}
+          <div class="uni-editable" style="font-size:15px;font-weight:700;color:var(--green);margin-bottom:6px;" ${uniEnAttr('meaning_vi', false)}>${escapeHtml(cur.meaning_vi || '')}</div>
+          <div style="font-size:12.5px;"><b>${isEn ? 'Collocations:' : 'Cụm từ hay đi kèm:'}</b> <span class="mono uni-editable ${cur.collocations ? '' : 'uni-ph'}" style="color:#818CF8;" ${uniEnAttr('collocations', true)}>${escapeHtml(cur.collocations || (isEn ? 'Add collocations...' : 'Thêm cụm từ đi kèm...'))}</span></div>
         </div>
       </section>
 
       <section class="note-block">
         <div class="nb-head">
           <span class="nb-title">NGỮ CẢNH THỰC TẾ (SONG NGỮ EN ⇄ VI)</span>
-          ${cur.example_en ? `<button type="button" class="btn btn-sm" data-speak="${escapeHtml(cur.example_en)}">🔊 Đọc câu ví dụ</button>` : ''}
+          <button type="button" class="btn btn-sm ${cur.example_en ? '' : 'hidden'}" data-speak="${escapeHtml(cur.example_en || '')}">🔊 Đọc câu ví dụ</button>
         </div>
         <div class="nb-body">
-          <div class="vb-ex-en" style="margin-bottom:6px;">${escapeHtml(cur.example_en || '— Chưa có câu ví dụ Tiếng Anh —')}</div>
-          <div style="color:var(--muted);">${escapeHtml(cur.example_vi || '— Chưa có bản dịch Tiếng Việt —')}</div>
+          <div class="vb-ex-en uni-editable ${cur.example_en ? '' : 'uni-ph'}" style="margin-bottom:6px;" ${uniEnAttr('example_en', false)}>${escapeHtml(cur.example_en || (isEn ? '— No English example yet —' : '— Chưa có câu ví dụ Tiếng Anh —'))}</div>
+          <div class="uni-editable ${cur.example_vi ? '' : 'uni-ph'}" style="color:var(--muted);" ${uniEnAttr('example_vi', false)}>${escapeHtml(cur.example_vi || (isEn ? '— No Vietnamese translation yet —' : '— Chưa có bản dịch Tiếng Việt —'))}</div>
         </div>
       </section>
 
@@ -1685,6 +1691,7 @@ async function deleteEnVocabBankItem(cardId) {
 
 // ---- Modal Thêm / Sửa Thẻ SRS + Magic Fill ----
 function openEnVocabEditorModal(cardId = null) {
+  if (typeof flushUniFieldEdit === 'function') flushUniFieldEdit();
   const modal = document.getElementById('en-vocab-edit-modal');
   if (!modal) return;
   const cur = cardId ? (state.englishCards || []).find((x) => String(x.id) === String(cardId)) : null;

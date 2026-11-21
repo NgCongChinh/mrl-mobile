@@ -1068,6 +1068,9 @@ function _translateUiLeafNodes(rootEl, toEn) {
     '.detail-pane .nb-body',
     '.rep-inline-editor',
     '.rep-inline-editing',
+    '.uni-inline-editor',
+    '.uni-inline-editing',
+    '#inline-sec-editor-box',
     '.tag-inline-wrap',
     '#crossref-body .nb-body',
     '#crossref-body .warn-body',
@@ -1289,7 +1292,7 @@ async function translateVisibleRecordContentToEn() {
 
   const targets = [];
   document.querySelectorAll(selectors.join(', ')).forEach((el) => {
-    if (el.closest('.hidden') || el.closest('#view-en-vocab-bank') || el.querySelector('.inline-empty-prompt') || el.closest('.bilingual-sec-wrap') || el.closest('.rep-inline-editing') || el.querySelector('.rep-inline-editor')) return;
+    if (el.closest('.hidden') || el.closest('#view-en-vocab-bank') || el.querySelector('.inline-empty-prompt, .none') || el.closest('.bilingual-sec-wrap') || el.closest('.rep-inline-editing, .uni-inline-editing, #inline-sec-editor-box') || el.querySelector('.rep-inline-editor, .uni-inline-editor')) return;
     if (el.classList.contains('row-step-count') && el.closest('#plc-list, #network-list')) return;
     if (el.dataset.viHtmlOrig === undefined) {
       el.dataset.viHtmlOrig = el.innerHTML;

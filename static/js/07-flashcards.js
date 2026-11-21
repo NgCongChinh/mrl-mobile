@@ -1785,6 +1785,11 @@ document.addEventListener('keydown', (e) => {
       saveInlineSectionNow(true);
       return;
     }
+    if (state.uniInlineEdit) {
+      e.preventDefault();
+      if (typeof commitUniFieldEdit === 'function') commitUniFieldEdit();
+      return;
+    }
     if (state.repairInlineEdit) {
       e.preventDefault();
       if (typeof commitActiveRepairInlineEdit === 'function') commitActiveRepairInlineEdit();
@@ -1830,6 +1835,13 @@ document.addEventListener('keydown', (e) => {
     }
     if (state.inlineChipEdit) {
       cancelChipInlineEdit();
+      return;
+    }
+    if (typeof cancelUniFieldEdit === 'function' && cancelUniFieldEdit()) {
+      return;
+    }
+    if (state.inlineSectionEdit && typeof cancelInlineSectionEdit === 'function') {
+      cancelInlineSectionEdit();
       return;
     }
     if (typeof cancelActiveRepairInlineEdit === 'function' && cancelActiveRepairInlineEdit()) {

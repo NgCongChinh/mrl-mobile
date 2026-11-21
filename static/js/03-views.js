@@ -401,7 +401,6 @@ function renderRepairNoteBlockHtml(c, inline = true) {
         <span>LƯU Ý CẤP NGUỒN TEST &amp; CẤU HÌNH VẬN HÀNH</span>
         <span class="rep-head-acts">
           <span class="rep-save-st" data-save-st="note"></span>
-          ${inline ? `<button type="button" class="rep-mini-edit-btn" onclick="startRepairNoteEdit('${cid}')">✎ Sửa</button>` : ''}
         </span>
       </div>
       <div class="warn-body ${inline ? 'rep-editable' : ''}" data-rep-note-body="${cid}" ${inline ? `onclick="onRepairEditableClick(event, function(){ startRepairNoteEdit('${cid}'); })"` : ''}>${highlightTagsHtml(cleanNote, c.component_tags, c.fault_codes)}</div>
@@ -457,8 +456,7 @@ function buildRepairDetailHtml(c, opts = {}) {
             ${ledHtml(c.status_code)}
           </div>
           <div class="d-title-wrap" data-rep-title-wrap="${cid}">
-            <div class="d-title ${inline ? 'rep-editable-title' : ''}" ${inline ? `ondblclick="startRepairTitleEdit('${cid}')" title="Nhấp đúp để sửa tên thiết bị"` : ''}>${escapeHtml(c.brand_model)}</div>
-            ${inline ? `<button type="button" class="rep-title-edit-btn" onclick="startRepairTitleEdit('${cid}')" title="Sửa nhanh tên thiết bị" aria-label="Sửa tên thiết bị">✎</button>` : ''}
+            <div class="d-title ${inline ? 'rep-editable-title' : ''}" ${inline ? `onclick="onRepairEditableClick(event, function(){ startRepairTitleEdit('${cid}'); })"` : ''}>${escapeHtml(c.brand_model)}</div>
             <span class="rep-save-st" data-save-st="title"></span>
           </div>
           <div class="tags rep-tags-bar" data-rep-tags-bar="${cid}">${renderRepairInteractiveTagsHtml(c, inline)}</div>
@@ -524,8 +522,7 @@ function _restoreTitleHost(hostEl, c) {
   delete hostEl.dataset.viTextOrig;
   hostEl.classList.remove('rep-inline-editing');
   hostEl.innerHTML = `
-    <div class="d-title rep-editable-title" ondblclick="startRepairTitleEdit('${cid}')" title="Nhấp đúp để sửa tên thiết bị">${escapeHtml(c.brand_model)}</div>
-    <button type="button" class="rep-title-edit-btn" onclick="startRepairTitleEdit('${cid}')" title="Sửa nhanh tên thiết bị" aria-label="Sửa tên thiết bị">✎</button>
+    <div class="d-title rep-editable-title" onclick="onRepairEditableClick(event, function(){ startRepairTitleEdit('${cid}'); })">${escapeHtml(c.brand_model)}</div>
     <span class="rep-save-st" data-save-st="title"></span>`;
 }
 
@@ -571,24 +568,9 @@ function _mountRepairInlineEditor(hostEl, config) {
   hostEl.classList.remove('rep-editable');
   hostEl.classList.add('rep-inline-editing');
 
-  const isEn = _repairIsEnLang();
-  const saveLbl = isEn ? '✓ Save' : '✓ Lưu';
-  const cancelLbl = isEn ? 'Cancel (Esc)' : 'Hủy (Esc)';
-  const hintLbl = config.target === 'title'
-    ? (isEn ? 'Enter save · Esc cancel' : 'Enter lưu · Esc hủy')
-    : (isEn ? 'Ctrl+Enter save · Esc cancel' : 'Ctrl+Enter lưu · Esc hủy');
-
   hostEl.innerHTML = `
     <div class="rep-inline-editor">
-      <textarea class="inp ${config.singleLine ? 'mono rep-inline-title-ta' : ''} rep-inline-ta" rows="${config.rows || 3}" spellcheck="false" placeholder="${escapeHtml(config.placeholder || '')}"></textarea>
-      <div class="rep-inline-bar">
-        <span class="rep-inline-hint">${hintLbl}</span>
-        <span class="rep-save-st" data-save-st="inline-active"></span>
-        <div class="rep-inline-btns">
-          <button type="button" class="btn btn-sm" onmousedown="event.preventDefault()" onclick="cancelActiveRepairInlineEdit()">${cancelLbl}</button>
-          <button type="button" class="btn btn-sm btn-primary" onmousedown="event.preventDefault()" onclick="commitActiveRepairInlineEdit()">${saveLbl}</button>
-        </div>
-      </div>
+      <textarea class="inp ${config.singleLine ? 'mono rep-inline-title-ta' : ''} rep-inline-ta" rows="${config.rows || 2}" spellcheck="false" placeholder="${escapeHtml(config.placeholder || '')}"></textarea>
     </div>`;
 
   const ta = hostEl.querySelector('.rep-inline-ta');
@@ -1656,6 +1638,7 @@ function onKnowledgeFilterChange() {
 }
 function clearKnowledgeSearch() { document.getElementById('knowledge-search-input').value = ''; onKnowledgeFilterChange(); }
 function selectKnowledgeItem(id) {
+  if (typeof flushUniFieldEdit === 'function') flushUniFieldEdit();
   _flushInlineSectionOnLeave(false);
   state.selectedKnowledgeId = id;
   if (!state.knowledgeListPinned) state.knowledgeListCollapsed = true;
@@ -1664,12 +1647,15 @@ function selectKnowledgeItem(id) {
   if (pane) pane.scrollTop = 0;
 }
 function toggleSopStep(itemId, idx) {
+  const pane = document.getElementById('knowledge-detail');
+  const savedScroll = pane ? pane.scrollTop : 0;
   const key = `${itemId}:${idx}`;
   state.sopChecked[key] = !state.sopChecked[key];
   const filtered = getFilteredKnowledgeItems();
   const curIdx = Math.max(0, filtered.findIndex((k) => k.id === state.selectedKnowledgeId));
   const sel = filtered[curIdx];
   if (sel) renderKnowledgeDetail(sel, curIdx, filtered.length);
+  if (pane) pane.scrollTop = savedScroll;
   if (state.splitMode && state.pane2.group === 'knowledge' && state.pane2.id === itemId) renderPane2();
 }
 
@@ -1718,10 +1704,33 @@ function renderKnowledgeView() {
   renderKnowledgeDetail(filtered[curIdx], curIdx, filtered.length);
 }
 
+function renderKnowledgeSopListInnerHtml(k, inline = true) {
+  const steps = parseSopSteps(k.core_concept_workflow);
+  const hl = (t) => highlightTagsHtml(String(t || '').trim(), k.component_tags);
+  const kid = escapeHtml(k.id);
+  if (!steps.length) {
+    return inline
+      ? `<div class="empty">— Chưa có các bước chi tiết (chạm để nhập 1. 2. 3...) —</div>`
+      : '<div class="empty">CHƯA CÓ CÁC BƯỚC CHI TIẾT</div>';
+  }
+  return steps.map((s, i) => {
+    const ck = Boolean(state.sopChecked[`${k.id}:${i}`]);
+    return `<div class="sop-row ${ck ? 'done' : ''}">
+      <input type="checkbox" ${ck ? 'checked' : ''} onclick="event.stopPropagation(); toggleSopStep('${kid}', ${i})" />
+      <span class="sop-num" onclick="event.stopPropagation(); toggleSopStep('${kid}', ${i})">BƯỚC ${escapeHtml(s.num)}</span>
+      <div class="sop-txt">${hl(s.text)}</div></div>`;
+  }).join('');
+}
+
 function buildKnowledgeDetailHtml(k, opts = {}) {
   const { showNav = true, currentIdx = 0, total = 1, showDropzone = true, codePrefix = '', pane = 'primary', inline = true } = opts;
   const sopMode = isSopCategory(k.category);
+  const kid = escapeHtml(k.id);
   const hl = (t) => highlightTagsHtml(String(t || '').trim(), k.component_tags);
+  const uniAttrs = (field, singleLine = false) => inline
+    ? `data-uni-edit="1" data-uni-kind="knowledge" data-uni-id="${kid}" data-uni-field="${field}" onclick="startUniFieldEdit('knowledge', '${kid}', '${field}', event, { singleLine: ${singleLine} })"`
+    : '';
+  const uniCls = inline ? 'uni-editable' : '';
   let body = '';
 
   if (sopMode) {
@@ -1733,55 +1742,49 @@ function buildKnowledgeDetailHtml(k, opts = {}) {
           <span class="sec-title">QUY TRÌNH ĐO &amp; SỬA (SOP)</span>
           <span class="sop-count">${done} / ${steps.length} HOÀN THÀNH</span>
         </div>
-        <div>${steps.length ? steps.map((s, i) => {
-          const ck = Boolean(state.sopChecked[`${k.id}:${i}`]);
-          return `<div class="sop-row ${ck ? 'done' : ''}" onclick="toggleSopStep('${escapeHtml(k.id)}', ${i})">
-            <input type="checkbox" ${ck ? 'checked' : ''} />
-            <span class="sop-num">BƯỚC ${escapeHtml(s.num)}</span>
-            <div class="sop-txt">${hl(s.text)}</div></div>`;
-        }).join('') : '<div class="empty">CHƯA CÓ CÁC BƯỚC CHI TIẾT</div>'}</div>
+        <div class="${uniCls}" ${uniAttrs('core_concept_workflow', false)}>${renderKnowledgeSopListInnerHtml(k, inline)}</div>
       </div>
-      ${k.actionable_application ? `<div class="sec"><div class="note-block accent"><div class="nb-title">ỨNG DỤNG THỰC CHIẾN</div><div class="nb-body">${hl(k.actionable_application)}</div></div></div>` : ''}`;
+      ${(k.actionable_application || inline) ? `<div class="sec"><div class="note-block accent"><div class="nb-title">ỨNG DỤNG THỰC CHIẾN</div><div class="nb-body ${uniCls}" ${uniAttrs('actionable_application', false)}>${k.actionable_application ? hl(k.actionable_application) : '<span class="none">— Chưa có (chạm để nhập) —</span>'}</div></div></div>` : ''}`;
   } else {
     body = `
-      ${k.core_concept_workflow ? `<div class="sec"><div class="sec-head"><span class="sec-title">BẢN CHẤT NGUYÊN LÝ</span></div><div class="nb-body">${hl(k.core_concept_workflow)}</div></div>` : ''}
-      ${k.why_question ? `
+      ${(k.core_concept_workflow || inline) ? `<div class="sec"><div class="sec-head"><span class="sec-title">BẢN CHẤT NGUYÊN LÝ</span></div><div class="nb-body ${uniCls}" ${uniAttrs('core_concept_workflow', false)}>${k.core_concept_workflow ? hl(k.core_concept_workflow) : '<span class="none">— Chưa có (chạm để nhập) —</span>'}</div></div>` : ''}
+      ${(k.why_question || k.source_group === 'Automation') ? `
         <div class="sec"><div class="grid2">
-          <div class="note-block why"><div class="nb-title">CÂU HỎI PHẢN BIỆN (TẠI SAO?)</div><div class="nb-body">${hl(k.why_question)}</div></div>
-          <div class="note-block ans"><div class="nb-title">TRẢ LỜI THỰC CHIẾN &amp; GIẢI PHÁP</div><div class="nb-body">${k.actionable_application ? hl(k.actionable_application) : '<span style="color:var(--text-3);">— Chưa có —</span>'}</div></div>
+          <div class="note-block why"><div class="nb-title">CÂU HỎI PHẢN BIỆN (TẠI SAO?)</div><div class="nb-body ${uniCls}" ${uniAttrs('why_question', false)}>${k.why_question ? hl(k.why_question) : '<span class="none">— Chưa có (chạm để nhập) —</span>'}</div></div>
+          <div class="note-block ans"><div class="nb-title">TRẢ LỜI THỰC CHIẾN &amp; GIẢI PHÁP</div><div class="nb-body ${uniCls}" ${uniAttrs('actionable_application', false)}>${k.actionable_application ? hl(k.actionable_application) : '<span class="none">— Chưa có (chạm để nhập) —</span>'}</div></div>
         </div></div>`
-        : (k.actionable_application ? `<div class="sec"><div class="note-block accent"><div class="nb-title">ỨNG DỤNG THỰC CHIẾN</div><div class="nb-body">${hl(k.actionable_application)}</div></div></div>` : '')}`;
+        : `<div class="sec"><div class="note-block accent"><div class="nb-title">ỨNG DỤNG THỰC CHIẾN</div><div class="nb-body ${uniCls}" ${uniAttrs('actionable_application', false)}>${k.actionable_application ? hl(k.actionable_application) : '<span class="none">— Chưa có (chạm để nhập) —</span>'}</div></div></div>`}`;
   }
 
   return `
     <div class="detail-inner">
       ${showNav ? renderFocusNavBar('knowledge', currentIdx, total) : ''}
-      <div class="d-head" data-ctx-record-kind="knowledge" data-ctx-record-id="${escapeHtml(k.id)}">
+      <div class="d-head" data-ctx-record-kind="knowledge" data-ctx-record-id="${kid}">
         <div style="min-width:0;">
           <div class="d-meta">
-            <span class="d-id">${escapeHtml(k.id)}</span>
+            <span class="d-id">${kid}</span>
             <span>${escapeHtml(groupLabel(k.source_group))}</span>
             ${k.category ? `<span>${escapeHtml(stripEmoji(k.category).toUpperCase())}</span>` : ''}
             <span>${escapeHtml(k.record_date || '----------')}</span>
             ${ledHtml(k.status_code)}
           </div>
-          <div class="d-title">${escapeHtml(k.topic_model)}</div>
+          <div class="d-title ${inline ? 'uni-editable uni-editable-title' : ''}" ${uniAttrs('topic_model', true)}>${escapeHtml(k.topic_model)}</div>
           <div class="tags">${renderTagPills(k.component_tags, []) || '<span class="mono" style="font-size:12px;color:var(--text-3);">CHƯA GẮN MÃ</span>'}</div>
         </div>
         <div class="d-controls">
           ${renderStatusSwitcher('knowledge', k.id, k.status_code)}
           <div class="d-btns">
-            <button class="btn btn-sm" onclick="startDrillForItem('knowledge', '${escapeHtml(k.id)}')" title="Ôn tập sâu mọi ý &amp; câu hỏi của bài này">🎯 Ôn bài này</button>
-            <button class="btn btn-sm" onclick="openKnowledgeModal('${escapeHtml(k.id)}')">Sửa</button>
-            <button class="btn btn-sm btn-danger" onclick="deleteRecord('knowledge', '${escapeHtml(k.id)}')">Xóa</button>
+            <button class="btn btn-sm" onclick="startDrillForItem('knowledge', '${kid}')" title="Ôn tập sâu mọi ý &amp; câu hỏi của bài này">🎯 Ôn bài này</button>
+            <button class="btn btn-sm" onclick="openKnowledgeModal('${kid}')">Sửa</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteRecord('knowledge', '${kid}')">Xóa</button>
           </div>
         </div>
       </div>
 
-      ${k.key_takeaway ? `<div class="note-block accent"><div class="nb-title">TỪ KHÓA LÕI</div><div class="nb-body" style="font-weight:500;">${hl(k.key_takeaway)}</div></div>` : ''}
-      <div id="knowledge-bilingual-host-${escapeHtml(k.id)}" class="bilingual-sec-wrap hidden"></div>
+      ${k.key_takeaway ? `<div class="note-block accent"><div class="nb-title">TỪ KHÓA LÕI</div><div class="nb-body ${uniCls}" style="font-weight:500;" ${uniAttrs('key_takeaway', false)}>${hl(k.key_takeaway)}</div></div>` : ''}
+      <div id="knowledge-bilingual-host-${kid}" class="bilingual-sec-wrap hidden"></div>
       ${body}
-      ${k.note ? `<div class="sec"><div class="warn safety"><div class="warn-title"><span>LƯU Ý AN TOÀN &amp; THỰC HÀNH</span></div><div class="warn-body">${hl(k.note)}</div></div></div>` : ''}
+      ${k.note ? `<div class="sec"><div class="warn safety"><div class="warn-title"><span>LƯU Ý AN TOÀN &amp; THỰC HÀNH</span></div><div class="warn-body ${uniCls}" ${uniAttrs('note', false)}>${hl(k.note)}</div></div></div>` : ''}
       ${renderCustomSectionsHtml(k.custom_sections_json || [], `${codePrefix}knw:${k.id}`, k.component_tags || [], inline ? { kind: 'knowledge', id: k.id, pane } : null)}
       ${renderAttachmentSection('knowledge', k.id, k.attachments || [], showDropzone)}
     </div>`;

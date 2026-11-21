@@ -34,6 +34,7 @@ function onPlcFilterChange() {
 }
 function clearPlcSearch() { document.getElementById('plc-search-input').value = ''; onPlcFilterChange(); }
 function selectPlcNote(id) {
+  if (typeof flushUniFieldEdit === 'function') flushUniFieldEdit();
   _flushInlineSectionOnLeave(false);
   state.selectedPlcId = id;
   if (!state.plcListPinned) state.plcListCollapsed = true;
@@ -125,7 +126,7 @@ function buildPlcDetailHtml(p, opts = {}) {
             <span>${escapeHtml(p.record_date || '----------')}</span>
             ${ledHtml(p.status_code)}
           </div>
-          <div class="d-title">${escapeHtml(p.title)}</div>
+          <div class="d-title ${inline ? 'uni-editable uni-editable-title' : ''}" ${inline ? `data-uni-edit="1" data-uni-kind="plc" data-uni-id="${escapeHtml(p.id)}" data-uni-field="title" onclick="startUniFieldEdit('plc', '${escapeHtml(p.id)}', 'title', event, { singleLine: true })"` : ''}>${escapeHtml(p.title)}</div>
           <div class="tags">${renderTagChipsPlain(p.tags) || '<span class="mono" style="font-size:12px;color:var(--text-3);">CHƯA GẮN MÃ</span>'}</div>
         </div>
         <div class="d-controls">
@@ -188,6 +189,7 @@ function onNetworkFilterChange() {
 }
 function clearNetworkSearch() { document.getElementById('network-search-input').value = ''; onNetworkFilterChange(); }
 function selectNetworkNote(id) {
+  if (typeof flushUniFieldEdit === 'function') flushUniFieldEdit();
   _flushInlineSectionOnLeave(false);
   state.selectedNetworkId = id;
   if (!state.networkListPinned) state.networkListCollapsed = true;
@@ -279,7 +281,7 @@ function buildNetworkDetailHtml(n, opts = {}) {
             <span>${escapeHtml(n.record_date || '----------')}</span>
             ${ledHtml(n.status_code)}
           </div>
-          <div class="d-title">${escapeHtml(n.target_device)}</div>
+          <div class="d-title ${inline ? 'uni-editable uni-editable-title' : ''}" ${inline ? `data-uni-edit="1" data-uni-kind="network" data-uni-id="${escapeHtml(n.id)}" data-uni-field="target_device" onclick="startUniFieldEdit('network', '${escapeHtml(n.id)}', 'target_device', event, { singleLine: true })"` : ''}>${escapeHtml(n.target_device)}</div>
           <div class="tags">${renderTagChipsPlain(n.tags) || '<span class="mono" style="font-size:12px;color:var(--text-3);">CHƯA GẮN MÃ</span>'}</div>
         </div>
         <div class="d-controls">
