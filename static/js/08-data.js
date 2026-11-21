@@ -51,6 +51,7 @@ async function deleteRecord(parentType, id) {
     }
     if (state.repairTagAdd && state.repairTagAdd.caseId === id) state.repairTagAdd = null;
     if (state.repairDraftSteps) delete state.repairDraftSteps[id];
+    if (state.repairDraftColdRows) delete state.repairDraftColdRows[id];
   }
   const endpointMap = {
     repair: `/api/repair-cases/${encodeURIComponent(id)}`,
@@ -67,11 +68,111 @@ async function deleteRecord(parentType, id) {
   } catch (err) { showToast(err.message, 'error'); }
 }
 
-function insertColdCheckTemplateToModal() {
-  const ta = document.getElementById('rep-form-cold');
-  if (typeof appendColdCheckTemplateToTextarea === 'function') {
-    appendColdCheckTemplateToTextarea(ta);
+function _modalColdStatusMeta(status) {
+  const isEn = typeof state !== 'undefined' && state.appLang === 'en';
+  if (typeof _coldCheckStatusMeta === 'function') {
+    return _coldCheckStatusMeta(status, isEn);
   }
+  const s = String(status || 'none').toLowerCase();
+  if (s === 'ok') return { code: 'ok', label: '🟢 OK', next: 'suspect', cls: 'cc-st-badge-ok' };
+  if (s === 'suspect') return { code: 'suspect', label: isEn ? '🟡 Suspect' : '🟡 Nghi ngờ', next: 'fault', cls: 'cc-st-badge-suspect' };
+  if (s === 'fault') return { code: 'fault', label: isEn ? '🔴 Fault' : '🔴 Hỏng', next: 'none', cls: 'cc-st-badge-fault' };
+  return { code: 'none', label: '—', next: 'ok', cls: 'cc-st-badge-none' };
+}
+
+function addModalColdCheckRow(rowData = { id: '', item: '', result: '', status: 'none' }, focusField = null) {
+  const container = document.getElementById('rep-form-cold-container');
+  if (!container) return null;
+  const isEn = typeof state !== 'undefined' && state.appLang === 'en';
+  const st = ['none', 'ok', 'suspect', 'fault'].includes(String(rowData?.status || 'none'))
+    ? String(rowData.status)
+    : 'none';
+  const meta = _modalColdStatusMeta(st);
+
+  const row = document.createElement('div');
+  row.className = `rep-modal-cc-row cc-st-${st}`;
+  row.dataset.ccId = rowData?.id || '';
+  row.dataset.ccStatus = st;
+  row.innerHTML = `
+    <input type="text" class="inp rep-cc-item-inp" spellcheck="false" placeholder="${isEn ? 'Component (e.g. Cap, Opto)...' : 'Thành phần (VD: Tụ lọc, Opto)...'}" value="${escapeHtml(rowData?.item || '')}" />
+    <textarea class="inp rep-cc-res-inp" rows="1" spellcheck="false" placeholder="${isEn ? 'Measurement / Result...' : 'Thông số đo / Kết quả...'}">${escapeHtml(rowData?.result || '')}</textarea>
+    <button type="button" class="cc-status-btn ${meta.cls}" data-no-i18n="1" onclick="cycleModalColdCheckStatus(this)" title="${isEn ? 'Click to cycle status' : 'Chạm để đổi trạng thái'}">${escapeHtml(meta.label)}</button>
+    <button type="button" class="cc-del-btn modal-cc-del" onclick="this.closest('.rep-modal-cc-row').remove()" title="${isEn ? 'Delete row' : 'Xóa dòng'}" aria-label="${isEn ? 'Delete row' : 'Xóa dòng'}">×</button>`;
+  container.appendChild(row);
+
+  const ta = row.querySelector('.rep-cc-res-inp');
+  if (ta && typeof _autoResizeRepairTextarea === 'function') {
+    _autoResizeRepairTextarea(ta, 34);
+    ta.addEventListener('input', () => _autoResizeRepairTextarea(ta, 34));
+  }
+  if (focusField === 'item') row.querySelector('.rep-cc-item-inp')?.focus();
+  else if (focusField === 'result') ta?.focus();
+  return row;
+}
+
+function cycleModalColdCheckStatus(btn) {
+  const row = btn?.closest('.rep-modal-cc-row');
+  if (!row) return;
+  const cur = row.dataset.ccStatus || 'none';
+  const next = _modalColdStatusMeta(cur).next;
+  const meta = _modalColdStatusMeta(next);
+  row.dataset.ccStatus = meta.code;
+  row.classList.remove('cc-st-none', 'cc-st-ok', 'cc-st-suspect', 'cc-st-fault');
+  row.classList.add(`cc-st-${meta.code}`);
+  btn.className = `cc-status-btn ${meta.cls}`;
+  btn.textContent = meta.label;
+}
+
+function collectModalColdCheckRows() {
+  const rows = [];
+  document.querySelectorAll('#rep-form-cold-container .rep-modal-cc-row').forEach((row) => {
+    const item = String(row.querySelector('.rep-cc-item-inp')?.value || '').trim();
+    const result = String(row.querySelector('.rep-cc-res-inp')?.value || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+    const status = row.dataset.ccStatus || 'none';
+    if (!item && !result) return;
+    const rawId = String(row.dataset.ccId || '').trim();
+    rows.push({
+      id: rawId || `cc-${rows.length + 1}`,
+      item,
+      result,
+      status: ['none', 'ok', 'suspect', 'fault'].includes(status) ? status : 'none',
+    });
+  });
+  return rows;
+}
+
+function insertColdCheckTemplateToModal() {
+  const isEn = typeof state !== 'undefined' && state.appLang === 'en';
+  const existingKeys = new Set(
+    Array.from(document.querySelectorAll('#rep-form-cold-container .rep-cc-item-inp'))
+      .map((inp) => String(inp.value || '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const templates = typeof COLD_CHECK_TEMPLATE_ROWS !== 'undefined'
+    ? COLD_CHECK_TEMPLATE_ROWS
+    : [
+      { vi: 'Ngoại quan', en: 'Visual Inspection' },
+      { vi: 'Cầu chì / Nguồn vào', en: 'Fuse / Input Power' },
+      { vi: 'Cầu chỉnh lưu / DC Bus', en: 'Rectifier Bridge / DC Bus' },
+      { vi: 'Tụ lọc / ESR', en: 'Filter Capacitors / ESR' },
+      { vi: 'IGBT / MOSFET', en: 'IGBT / MOSFET' },
+      { vi: 'Driver / Opto', en: 'Driver / Optocoupler' },
+    ];
+  let firstRow = null;
+  let added = 0;
+  templates.forEach((tpl) => {
+    if (existingKeys.has(tpl.vi.toLowerCase()) || existingKeys.has(tpl.en.toLowerCase())) return;
+    const label = isEn ? tpl.en : tpl.vi;
+    existingKeys.add(label.toLowerCase());
+    const row = addModalColdCheckRow({ id: '', item: label, result: '', status: 'none' });
+    if (!firstRow) firstRow = row;
+    added += 1;
+  });
+  if (!added) {
+    showToast(isEn ? 'All standard cold check rows already exist' : 'Đã có đủ 6 hạng mục mẫu đo nguội', 'info');
+    return;
+  }
+  firstRow?.querySelector('.rep-cc-res-inp')?.focus();
 }
 
 function openRepairModal(caseId = null, appendBlankStep = false) {
@@ -80,11 +181,13 @@ function openRepairModal(caseId = null, appendBlankStep = false) {
   const form = document.getElementById('repair-form');
   const title = document.getElementById('repair-modal-title').querySelector('span');
   const container = document.getElementById('rep-form-steps-container');
+  const coldContainer = document.getElementById('rep-form-cold-container');
   const advDetails = document.getElementById('rep-form-advanced');
   const tagsWrap = document.getElementById('rep-form-tags-wrap');
   const coldLbl = document.getElementById('rep-form-cold-lbl');
   const submitBtn = document.getElementById('rep-form-submit-btn');
   container.innerHTML = '';
+  if (coldContainer) coldContainer.innerHTML = '';
   if (caseId) {
     const c = state.repairCases.find((x) => x.id === caseId);
     if (!c) return;
@@ -96,7 +199,10 @@ function openRepairModal(caseId = null, appendBlankStep = false) {
     document.getElementById('rep-form-model').value = c.brand_model || '';
     document.getElementById('rep-form-date').value = c.record_date || '';
     document.getElementById('rep-form-status').value = c.status_code || 'review';
-    document.getElementById('rep-form-cold').value = c.cold_check_raw || '';
+    const coldRows = (window.MRLCoreStore && typeof window.MRLCoreStore.resolveColdCheckRows === 'function')
+      ? window.MRLCoreStore.resolveColdCheckRows(c.cold_check_json, c.cold_check_raw)
+      : (Array.isArray(c.cold_check_json) ? c.cold_check_json : []);
+    coldRows.forEach((r) => addModalColdCheckRow(r));
     document.getElementById('rep-form-note').value = c.note || '';
     document.getElementById('rep-form-tags').value = (c.component_tags || []).join(', ');
     document.getElementById('rep-form-faults').value = (c.fault_codes || []).join(', ');
@@ -116,7 +222,6 @@ function openRepairModal(caseId = null, appendBlankStep = false) {
     document.getElementById('rep-form-model').value = '';
     document.getElementById('rep-form-date').value = new Date().toISOString().slice(0, 10);
     document.getElementById('rep-form-status').value = 'researching';
-    document.getElementById('rep-form-cold').value = '';
     document.getElementById('rep-form-note').value = '';
     document.getElementById('rep-form-tags').value = '';
     document.getElementById('rep-form-faults').value = '';
@@ -172,12 +277,17 @@ async function submitRepairForm(event) {
     .filter((s) => s.symptom || s.root_cause || s.solution)
     .map((s, i) => ({ step_order: i + 1, ...s }));
   const csv = (v) => v.split(',').map((s) => s.trim().replace(/^#/, '')).filter(Boolean);
+  const coldRows = collectModalColdCheckRows();
+  const coldRaw = (window.MRLCoreStore && typeof window.MRLCoreStore.serializeColdCheckRowsToText === 'function')
+    ? window.MRLCoreStore.serializeColdCheckRowsToText(coldRows)
+    : '';
   const payload = {
     device_category: document.getElementById('rep-form-category').value,
     brand_model: document.getElementById('rep-form-model').value.trim(),
     record_date: document.getElementById('rep-form-date').value.trim() || null,
     status_code: document.getElementById('rep-form-status').value,
-    cold_check_raw: document.getElementById('rep-form-cold').value.trim(),
+    cold_check_raw: coldRaw,
+    cold_check_json: coldRows,
     note: document.getElementById('rep-form-note').value.trim(),
     component_tags: id ? csv(document.getElementById('rep-form-tags').value) : [],
     fault_codes: csv(document.getElementById('rep-form-faults').value),

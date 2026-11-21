@@ -1,35 +1,61 @@
 // ---------------------------------------------------------------------------
 // 01 Nhật ký ca sửa chữa (Inline Editing + Auto-Save + Bench Workflow)
 // ---------------------------------------------------------------------------
-const COLD_CHECK_TEMPLATE = [
-  '- Ngoại quan (cháy nổ / phồng tụ): ',
-  '- Cầu chì / Nguồn vào: ',
-  '- Cầu chỉnh lưu / DC Bus: ',
-  '- IGBT / MOSFET công suất: ',
-  '- Tụ lọc nguồn / Tụ bootstrap: ',
-  '- Điện trở kích Gate / Opto: ',
-].join('\n');
+const COLD_CHECK_TEMPLATE_ROWS = [
+  { vi: 'Ngoại quan', en: 'Visual Inspection' },
+  { vi: 'Cầu chì / Nguồn vào', en: 'Fuse / Input Power' },
+  { vi: 'Cầu chỉnh lưu / DC Bus', en: 'Rectifier Bridge / DC Bus' },
+  { vi: 'Tụ lọc / ESR', en: 'Filter Capacitors / ESR' },
+  { vi: 'IGBT / MOSFET', en: 'IGBT / MOSFET' },
+  { vi: 'Driver / Opto', en: 'Driver / Optocoupler' },
+];
 
-function appendColdCheckTemplateToTextarea(ta) {
-  if (!ta) return;
-  const cur = String(ta.value || '');
-  let cursorPos = 0;
-  if (!cur.trim()) {
-    ta.value = COLD_CHECK_TEMPLATE;
-    const nl = COLD_CHECK_TEMPLATE.indexOf('\n');
-    cursorPos = nl >= 0 ? nl : COLD_CHECK_TEMPLATE.length;
-  } else {
-    const prefix = cur.endsWith('\n') ? '' : '\n';
-    const offset = cur.length + prefix.length;
-    ta.value = cur + prefix + COLD_CHECK_TEMPLATE;
-    const nl = COLD_CHECK_TEMPLATE.indexOf('\n');
-    cursorPos = offset + (nl >= 0 ? nl : COLD_CHECK_TEMPLATE.length);
+function _coldCheckStatusMeta(status, isEn = _repairIsEnLang()) {
+  const s = String(status || 'none').toLowerCase();
+  if (s === 'ok') return { code: 'ok', label: '🟢 OK', next: 'suspect', cls: 'cc-st-badge-ok' };
+  if (s === 'suspect') return { code: 'suspect', label: isEn ? '🟡 Suspect' : '🟡 Nghi ngờ', next: 'fault', cls: 'cc-st-badge-suspect' };
+  if (s === 'fault') return { code: 'fault', label: isEn ? '🔴 Fault' : '🔴 Hỏng', next: 'none', cls: 'cc-st-badge-fault' };
+  return { code: 'none', label: '—', next: 'ok', cls: 'cc-st-badge-none' };
+}
+
+function _resolveColdCheckRowsForCase(c) {
+  if (!c) return [];
+  if (window.MRLCoreStore && typeof window.MRLCoreStore.resolveColdCheckRows === 'function') {
+    return window.MRLCoreStore.resolveColdCheckRows(c.cold_check_json, c.cold_check_raw);
   }
-  if (ta.classList.contains('rep-inline-ta') || ta.id === 'rep-form-cold') {
-    _autoResizeRepairTextarea(ta, ta.id === 'rep-form-cold' ? 110 : 88);
+  return Array.isArray(c.cold_check_json) ? c.cold_check_json : [];
+}
+
+function _serializeColdCheckRowsJS(rows) {
+  if (window.MRLCoreStore && typeof window.MRLCoreStore.serializeColdCheckRowsToText === 'function') {
+    return window.MRLCoreStore.serializeColdCheckRowsToText(rows);
   }
-  ta.focus({ preventScroll: true });
-  try { ta.setSelectionRange(cursorPos, cursorPos); } catch (_) {}
+  return '';
+}
+
+function _getDisplayColdRowsForCase(c) {
+  if (!c) return [];
+  const saved = _resolveColdCheckRowsForCase(c).map((r) => ({ ...r, _isDraft: false }));
+  const drafts = (state.repairDraftColdRows && Array.isArray(state.repairDraftColdRows[c.id]))
+    ? state.repairDraftColdRows[c.id]
+    : [];
+  const combined = [...saved];
+  drafts.forEach((d) => {
+    const itemCopy = {
+      id: d.id || `cc-draft-${Date.now()}`,
+      item: d.item || '',
+      result: d.result || '',
+      status: d.status || 'none',
+      _isDraft: true,
+      _insertAt: typeof d._insertAt === 'number' ? d._insertAt : null,
+    };
+    if (typeof itemCopy._insertAt === 'number' && itemCopy._insertAt >= 0 && itemCopy._insertAt <= combined.length) {
+      combined.splice(itemCopy._insertAt, 0, itemCopy);
+    } else {
+      combined.push(itemCopy);
+    }
+  });
+  return combined;
 }
 
 function _autoResizeRepairTextarea(ta, minH = 68) {
@@ -261,27 +287,101 @@ function renderRepairInteractiveTagsHtml(c, inline = true) {
     + renderSlot('comp', 'tag-add-comp', '+ Linh kiện', 'A3120, IGBT...');
 }
 
+function _coldCheckCellHtml(val, c, placeholder = '—') {
+  const clean = String(val || '').trim();
+  return clean
+    ? highlightTagsHtml(clean, c?.component_tags, c?.fault_codes)
+    : `<span class="none">${escapeHtml(placeholder)}</span>`;
+}
+
+function _coldCheckCountMetaHtml(rows, isEn = _repairIsEnLang()) {
+  const total = (rows || []).length;
+  const faultCount = (rows || []).filter((r) => String(r.status || 'none') === 'fault').length;
+  const suspectCount = (rows || []).filter((r) => String(r.status || 'none') === 'suspect').length;
+  const parts = [`${total} ${isEn ? (total === 1 ? 'item' : 'items') : 'hạng mục'}`];
+  if (faultCount > 0) {
+    parts.push(`<span class="cc-cnt-fault">${faultCount} ${isEn ? 'fault' : 'hỏng'}</span>`);
+  }
+  if (suspectCount > 0) {
+    parts.push(`<span class="cc-cnt-suspect">${suspectCount} ${isEn ? 'suspect' : 'nghi ngờ'}</span>`);
+  }
+  return parts.join(' · ');
+}
+
 function renderRepairColdCheckBlockHtml(c, inline = true) {
-  const cleanCold = String(c.cold_check_raw || '').trim();
+  const rows = _getDisplayColdRowsForCase(c);
   const cid = escapeHtml(c.id);
-  if (!cleanCold) {
+  const isEn = _repairIsEnLang();
+
+  if (!rows.length) {
     if (!inline) return '';
     return `
       <div class="rep-collapsed-bar rep-cold-bar">
-        <button type="button" class="rep-collapsed-trigger" onclick="startRepairColdCheckEdit('${cid}', false)">+ Thêm ngoại quan &amp; đo nguội (Cold Check)</button>
-        <button type="button" class="btn btn-sm rep-tpl-btn" onclick="startRepairColdCheckEdit('${cid}', true)">⚡ Chèn mẫu đo nguội</button>
+        <button type="button" class="rep-collapsed-trigger" onclick="addColdCheckRowInline('${cid}', true)">${isEn ? '+ Add Cold Check' : '+ Thêm đo nguội (Cold Check)'}</button>
+        <button type="button" class="btn btn-sm rep-tpl-btn" onclick="insertColdCheckTemplateInline('${cid}')">⚡ ${isEn ? 'Insert Cold Check Template' : 'Chèn mẫu đo nguội'}</button>
       </div>`;
   }
+
+  const rowsHtml = rows.map((r, idx) => {
+    const st = ['none', 'ok', 'suspect', 'fault'].includes(String(r.status || 'none')) ? String(r.status || 'none') : 'none';
+    const meta = _coldCheckStatusMeta(st, isEn);
+    const itemPh = isEn ? 'Component...' : 'Thành phần...';
+    const resPh = isEn ? 'Measurement / Result...' : 'Kết quả / Thông số đo...';
+    const itemHtml = _coldCheckCellHtml(r.item, c, itemPh);
+    const resHtml = _coldCheckCellHtml(r.result, c, resPh);
+
+    const itemAttrs = inline
+      ? `class="cc-cell cc-cell-item cc-editable" data-cc-idx="${idx}" data-cc-field="item" onmousedown="onColdCheckCellMouseDown('${cid}', ${idx})" onclick="onRepairEditableClick(event, function(){ startColdCheckCellEdit('${cid}', ${idx}, 'item'); })"`
+      : `class="cc-cell cc-cell-item"`;
+    const resAttrs = inline
+      ? `class="cc-cell cc-cell-result cc-editable" data-cc-idx="${idx}" data-cc-field="result" onmousedown="onColdCheckCellMouseDown('${cid}', ${idx})" onclick="onRepairEditableClick(event, function(){ startColdCheckCellEdit('${cid}', ${idx}, 'result'); })"`
+      : `class="cc-cell cc-cell-result"`;
+
+    const statusEl = inline
+      ? `<button type="button" class="cc-status-btn ${meta.cls}" data-no-i18n="1" data-cc-status-idx="${idx}" onmousedown="event.preventDefault()" onclick="cycleColdCheckStatusInline('${cid}', ${idx}, event)" title="${isEn ? 'Click to cycle status (— / OK / Suspect / Fault)' : 'Chạm để đổi nhanh trạng thái (— / OK / Nghi ngờ / Hỏng)'}">${escapeHtml(meta.label)}</button>`
+      : `<span class="cc-status-pill ${meta.cls}" data-no-i18n="1">${escapeHtml(meta.label)}</span>`;
+
+    return `
+      <tr class="cc-row cc-st-${st}" data-cc-idx="${idx}" data-cc-id="${escapeHtml(r.id || '')}">
+        <td class="cc-td-item"><div ${itemAttrs}>${itemHtml}</div></td>
+        <td class="cc-td-result"><div ${resAttrs}>${resHtml}</div></td>
+        <td class="cc-td-status">${statusEl}</td>
+        ${inline ? `<td class="cc-td-act"><button type="button" class="cc-del-btn" onmousedown="event.preventDefault()" onclick="deleteColdCheckRowInline('${cid}', ${idx}, event)" title="${isEn ? 'Delete row' : 'Xóa dòng'}" aria-label="${isEn ? 'Delete row' : 'Xóa dòng'}">×</button></td>` : ''}
+      </tr>`;
+  }).join('');
+
   return `
     <div class="cold-check-card">
       <div class="cold-check-head">
-        <span>TIẾP NHẬN &amp; ĐO NGUỘI (COLD CHECK)</span>
+        <div class="cc-head-left">
+          <span>${isEn ? 'INTAKE &amp; COLD CHECK' : 'TIẾP NHẬN &amp; ĐO NGUỘI (COLD CHECK)'}</span>
+          <span class="cc-count-meta" data-no-i18n="1">${_coldCheckCountMetaHtml(rows, isEn)}</span>
+        </div>
         <span class="rep-head-acts">
           <span class="rep-save-st" data-save-st="cold"></span>
-          ${inline ? `<button type="button" class="rep-mini-edit-btn" onclick="startRepairColdCheckEdit('${cid}', false)">✎ Sửa</button>` : ''}
+          ${inline ? `<button type="button" class="btn btn-sm rep-tpl-btn" onmousedown="event.preventDefault()" onclick="insertColdCheckTemplateInline('${cid}')">⚡ ${isEn ? 'Template' : 'Mẫu đo nguội'}</button>` : ''}
+          ${inline ? `<button type="button" class="btn btn-sm cc-add-btn" onmousedown="event.preventDefault()" onclick="addColdCheckRowInline('${cid}', true)">+ ${isEn ? 'Add row' : 'Thêm dòng'}</button>` : ''}
         </span>
       </div>
-      <div class="cold-check-body ${inline ? 'rep-editable' : ''}" data-rep-cold-body="${cid}" ${inline ? `onclick="onRepairEditableClick(event, function(){ startRepairColdCheckEdit('${cid}', false); })"` : ''}>${highlightTagsHtml(cleanCold, c.component_tags, c.fault_codes)}</div>
+      <div class="cc-table-wrap">
+        <table class="cc-table">
+          <colgroup>
+            <col class="cc-col-item" />
+            <col class="cc-col-result" />
+            <col class="cc-col-status" />
+            ${inline ? '<col class="cc-col-act" />' : ''}
+          </colgroup>
+          <thead>
+            <tr>
+              <th>${isEn ? 'COMPONENT / CHECKPOINT' : 'THÀNH PHẦN KIỂM TRA'}</th>
+              <th>${isEn ? 'RESULT / MEASUREMENTS' : 'KẾT QUẢ / THÔNG SỐ ĐO'}</th>
+              <th style="text-align:center;">${isEn ? 'STATUS' : 'TRẠNG THÁI'}</th>
+              ${inline ? '<th></th>' : ''}
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
     </div>`;
 }
 
@@ -436,9 +536,16 @@ function _restoreFieldHost(ed, c, overrideVal = null) {
     _restoreTitleHost(ed.hostEl, { ...c, brand_model: val });
     return;
   }
-  if (ed.target === 'cold') {
-    const coldHost = document.querySelector('#repair-detail .rep-cold-host');
-    if (coldHost) coldHost.innerHTML = renderRepairColdCheckBlockHtml({ ...c, cold_check_raw: val }, true);
+  if (ed.target === 'cold-cell' && ed.hostEl) {
+    const isEn = _repairIsEnLang();
+    const ph = ed.field === 'item'
+      ? (isEn ? 'Component...' : 'Thành phần...')
+      : (isEn ? 'Measurement / Result...' : 'Kết quả / Thông số đo...');
+    delete ed.hostEl.dataset.viHtmlOrig;
+    delete ed.hostEl.dataset.viTextOrig;
+    ed.hostEl.classList.remove('rep-inline-editing');
+    ed.hostEl.classList.add('cc-editable');
+    ed.hostEl.innerHTML = _coldCheckCellHtml(val, c, ph);
     return;
   }
   if (ed.target === 'note') {
@@ -465,10 +572,6 @@ function _mountRepairInlineEditor(hostEl, config) {
   hostEl.classList.add('rep-inline-editing');
 
   const isEn = _repairIsEnLang();
-  const extraColdBtn = config.target === 'cold'
-    ? `<button type="button" class="btn btn-sm rep-tpl-btn" onmousedown="event.preventDefault()" onclick="insertColdCheckTemplateToInline()">⚡ ${isEn ? 'Insert Cold Check Template' : 'Chèn mẫu đo nguội'}</button>`
-    : '';
-
   const saveLbl = isEn ? '✓ Save' : '✓ Lưu';
   const cancelLbl = isEn ? 'Cancel (Esc)' : 'Hủy (Esc)';
   const hintLbl = config.target === 'title'
@@ -479,7 +582,6 @@ function _mountRepairInlineEditor(hostEl, config) {
     <div class="rep-inline-editor">
       <textarea class="inp ${config.singleLine ? 'mono rep-inline-title-ta' : ''} rep-inline-ta" rows="${config.rows || 3}" spellcheck="false" placeholder="${escapeHtml(config.placeholder || '')}"></textarea>
       <div class="rep-inline-bar">
-        ${extraColdBtn}
         <span class="rep-inline-hint">${hintLbl}</span>
         <span class="rep-save-st" data-save-st="inline-active"></span>
         <div class="rep-inline-btns">
@@ -491,16 +593,12 @@ function _mountRepairInlineEditor(hostEl, config) {
 
   const ta = hostEl.querySelector('.rep-inline-ta');
   ta.value = config.initialValue || '';
-  if (config.useTemplate) {
-    appendColdCheckTemplateToTextarea(ta);
-  } else {
-    _autoResizeRepairTextarea(ta, config.singleLine ? 38 : 72);
-    ta.focus({ preventScroll: true });
-    try {
-      const len = ta.value.length;
-      ta.setSelectionRange(len, len);
-    } catch (_) {}
-  }
+  _autoResizeRepairTextarea(ta, config.singleLine ? 38 : 72);
+  ta.focus({ preventScroll: true });
+  try {
+    const len = ta.value.length;
+    ta.setSelectionRange(len, len);
+  } catch (_) {}
 
   ta.addEventListener('input', () => _autoResizeRepairTextarea(ta, config.singleLine ? 38 : 72));
   ta.addEventListener('keydown', (e) => {
@@ -525,11 +623,325 @@ function _mountRepairInlineEditor(hostEl, config) {
   if (pane) pane.scrollTop = savedScroll;
 }
 
-function insertColdCheckTemplateToInline() {
+function onColdCheckCellMouseDown(caseId, rowIdx) {
   const ed = state.repairInlineEdit;
-  if (!ed || ed.target !== 'cold' || !ed.hostEl) return;
-  const ta = ed.hostEl.querySelector('.rep-inline-ta');
-  appendColdCheckTemplateToTextarea(ta);
+  if (ed && ed.target === 'cold-cell' && ed.caseId === caseId && ed.rowIdx === rowIdx) {
+    ed._movingWithinRow = true;
+  }
+}
+
+async function startColdCheckCellEdit(caseId, rowIdx, field) {
+  const cur = state.repairInlineEdit;
+  if (cur && cur.caseId === caseId && cur.target === 'cold-cell' && cur.rowIdx === rowIdx && cur.field === field) {
+    return;
+  }
+  if (cur) {
+    const keepBlankDraftRow = Boolean(
+      cur.target === 'cold-cell' && cur.caseId === caseId && cur.rowIdx === rowIdx && cur.field !== field
+    );
+    await commitActiveRepairInlineEdit({ keepBlankDraftRow });
+  }
+
+  const c = _getRepairCaseById(caseId);
+  if (!c) return;
+  const rows = _getDisplayColdRowsForCase(c);
+  const row = rows[rowIdx];
+  const hostEl = document.querySelector(`#repair-detail .cc-cell[data-cc-idx="${rowIdx}"][data-cc-field="${field}"]`);
+  if (!row || !hostEl) return;
+
+  const pane = document.getElementById('repair-detail');
+  const savedScroll = pane ? pane.scrollTop : 0;
+  const orig = String(row[field] || '');
+  const isEn = _repairIsEnLang();
+
+  delete hostEl.dataset.viHtmlOrig;
+  delete hostEl.dataset.viTextOrig;
+  hostEl.classList.remove('cc-editable');
+  hostEl.classList.add('rep-inline-editing');
+
+  state.repairInlineEdit = {
+    caseId,
+    target: 'cold-cell',
+    stepIdx: -1,
+    rowIdx,
+    rowId: row.id || '',
+    isDraft: Boolean(row._isDraft),
+    field,
+    origValue: orig,
+    hostEl,
+    saving: false,
+    cancelling: false,
+    _movingWithinRow: false,
+    _handledKeyAction: false,
+  };
+
+  if (field === 'item') {
+    const ph = isEn ? 'Component / Checkpoint...' : 'Thành phần kiểm tra...';
+    hostEl.innerHTML = `<input type="text" class="inp cc-inline-inp" spellcheck="false" placeholder="${escapeHtml(ph)}" />`;
+    const inp = hostEl.querySelector('.cc-inline-inp');
+    inp.value = orig;
+    inp.focus({ preventScroll: true });
+    try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (_) {}
+
+    inp.addEventListener('keydown', async (e) => {
+      const ed = state.repairInlineEdit;
+      if (!ed || ed.hostEl !== hostEl) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        ed._handledKeyAction = true;
+        cancelActiveRepairInlineEdit();
+        return;
+      }
+      if ((e.key === 'Tab' && !e.shiftKey) || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault();
+        e.stopPropagation();
+        ed._handledKeyAction = true;
+        await commitActiveRepairInlineEdit({
+          keepBlankDraftRow: true,
+          nextCell: { caseId, rowIdx, field: 'result' },
+        });
+      }
+    });
+    inp.addEventListener('blur', () => {
+      const ed = state.repairInlineEdit;
+      if (!ed || ed.hostEl !== hostEl || ed.cancelling || ed.saving || ed._handledKeyAction) return;
+      commitActiveRepairInlineEdit({ keepBlankDraftRow: Boolean(ed._movingWithinRow) });
+    });
+  } else {
+    const ph = isEn
+      ? 'Result / Measurements (Enter newline, Ctrl+Enter new row)...'
+      : 'Kết quả / Thông số đo (Enter xuống dòng, Ctrl+Enter thêm dòng)...';
+    hostEl.innerHTML = `<textarea class="inp cc-inline-ta" rows="1" spellcheck="false" placeholder="${escapeHtml(ph)}"></textarea>`;
+    const ta = hostEl.querySelector('.cc-inline-ta');
+    ta.value = orig;
+    _autoResizeRepairTextarea(ta, 36);
+    ta.focus({ preventScroll: true });
+    try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (_) {}
+
+    ta.addEventListener('input', () => _autoResizeRepairTextarea(ta, 36));
+    ta.addEventListener('keydown', async (e) => {
+      const ed = state.repairInlineEdit;
+      if (!ed || ed.hostEl !== hostEl) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        ed._handledKeyAction = true;
+        cancelActiveRepairInlineEdit();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        ed._handledKeyAction = true;
+        await commitActiveRepairInlineEdit({
+          addRowAfter: { caseId, afterIdx: rowIdx },
+        });
+      }
+    });
+    ta.addEventListener('blur', () => {
+      const ed = state.repairInlineEdit;
+      if (!ed || ed.hostEl !== hostEl || ed.cancelling || ed.saving || ed._handledKeyAction) return;
+      commitActiveRepairInlineEdit({ keepBlankDraftRow: Boolean(ed._movingWithinRow) });
+    });
+  }
+
+  if (pane) pane.scrollTop = savedScroll;
+}
+
+async function addColdCheckRowInline(caseId, autoFocus = true, insertAt = null) {
+  if (state.repairInlineEdit) {
+    await commitActiveRepairInlineEdit();
+  }
+  const c = _getRepairCaseById(caseId);
+  if (!c) return;
+  const pane = document.getElementById('repair-detail');
+  const savedScroll = pane ? pane.scrollTop : 0;
+
+  const savedRows = _resolveColdCheckRowsForCase(c);
+  state.repairDraftColdRows[caseId] = state.repairDraftColdRows[caseId] || [];
+  const draftId = `cc-draft-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const safeInsert = typeof insertAt === 'number' ? Math.max(0, Math.min(insertAt, savedRows.length)) : null;
+  state.repairDraftColdRows[caseId].push({
+    id: draftId,
+    item: '',
+    result: '',
+    status: 'none',
+    _isDraft: true,
+    _insertAt: safeInsert,
+  });
+
+  const coldHost = document.querySelector('#repair-detail .rep-cold-host');
+  if (coldHost) coldHost.innerHTML = renderRepairColdCheckBlockHtml(c, true);
+  if (pane) pane.scrollTop = savedScroll;
+
+  const displayRows = _getDisplayColdRowsForCase(c);
+  const targetIdx = Math.max(0, displayRows.findIndex((r) => r.id === draftId));
+  if (autoFocus) {
+    await startColdCheckCellEdit(caseId, targetIdx, 'item');
+  }
+  if (_repairIsEnLang() && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
+}
+
+async function insertColdCheckTemplateInline(caseId) {
+  if (state.repairInlineEdit) {
+    await commitActiveRepairInlineEdit();
+  }
+  const c = _getRepairCaseById(caseId);
+  if (!c) return;
+  const isEn = _repairIsEnLang();
+  const pane = document.getElementById('repair-detail');
+  const savedScroll = pane ? pane.scrollTop : 0;
+
+  const curRows = _resolveColdCheckRowsForCase(c);
+  const existingKeys = new Set(curRows.map((r) => String(r.item || '').trim().toLowerCase()).filter(Boolean));
+  const toAdd = [];
+  COLD_CHECK_TEMPLATE_ROWS.forEach((tpl, idx) => {
+    const kVi = tpl.vi.toLowerCase();
+    const kEn = tpl.en.toLowerCase();
+    if (existingKeys.has(kVi) || existingKeys.has(kEn)) return;
+    const label = isEn ? tpl.en : tpl.vi;
+    existingKeys.add(label.toLowerCase());
+    toAdd.push({
+      id: `cc-${curRows.length + toAdd.length + 1}`,
+      item: label,
+      result: '',
+      status: 'none',
+    });
+  });
+
+  if (!toAdd.length) {
+    showToast(isEn ? 'All standard cold check rows already exist' : 'Đã có đủ 6 hạng mục mẫu đo nguội', 'info');
+    return;
+  }
+
+  const rollback = _cloneRepairBackup(c);
+  const nextRows = [...curRows, ...toAdd].map((r, i) => ({
+    id: r.id || `cc-${i + 1}`,
+    item: r.item || '',
+    result: r.result || '',
+    status: r.status || 'none',
+  }));
+  const firstNewIdx = curRows.length;
+
+  c.cold_check_json = nextRows;
+  c.cold_check_raw = _serializeColdCheckRowsJS(nextRows);
+  const coldHost = document.querySelector('#repair-detail .rep-cold-host');
+  if (coldHost) coldHost.innerHTML = renderRepairColdCheckBlockHtml(c, true);
+  if (pane) pane.scrollTop = savedScroll;
+
+  await startColdCheckCellEdit(caseId, firstNewIdx, 'result');
+  patchRepairCaseInline(caseId, { cold_check_json: nextRows }, 'cold', { rollback });
+}
+
+async function cycleColdCheckStatusInline(caseId, rowIdx, event) {
+  if (event) event.stopPropagation();
+  const curEd = state.repairInlineEdit;
+  if (curEd) {
+    const keepSameRow = curEd.caseId === caseId && curEd.target === 'cold-cell' && curEd.rowIdx === rowIdx;
+    await commitActiveRepairInlineEdit({ keepBlankDraftRow: keepSameRow });
+  }
+  const c = _getRepairCaseById(caseId);
+  if (!c) return;
+  const pane = document.getElementById('repair-detail');
+  const savedScroll = pane ? pane.scrollTop : 0;
+
+  const displayRows = _getDisplayColdRowsForCase(c);
+  const target = displayRows[rowIdx];
+  if (!target) return;
+
+  const curMeta = _coldCheckStatusMeta(target.status);
+  const nextStatus = curMeta.next;
+
+  if (target._isDraft && !String(target.item || '').trim() && !String(target.result || '').trim()) {
+    const dList = state.repairDraftColdRows[caseId] || [];
+    const d = dList.find((x) => x.id === target.id);
+    if (d) d.status = nextStatus;
+    const coldHost = document.querySelector('#repair-detail .rep-cold-host');
+    if (coldHost) coldHost.innerHTML = renderRepairColdCheckBlockHtml(c, true);
+    if (pane) pane.scrollTop = savedScroll;
+    return;
+  }
+
+  const rollback = _cloneRepairBackup(c);
+  const nextRows = displayRows
+    .map((r, i) => ({
+      id: r.id || `cc-${i + 1}`,
+      item: String(r.item || '').trim(),
+      result: String(r.result || '').trim(),
+      status: i === rowIdx ? nextStatus : (r.status || 'none'),
+    }))
+    .filter((r) => r.item || r.result)
+    .map((r, i) => ({ ...r, id: r.id && !String(r.id).startsWith('cc-draft-') ? r.id : `cc-${i + 1}` }));
+
+  if (state.repairDraftColdRows && state.repairDraftColdRows[caseId]) {
+    delete state.repairDraftColdRows[caseId];
+  }
+  c.cold_check_json = nextRows;
+  c.cold_check_raw = _serializeColdCheckRowsJS(nextRows);
+
+  const coldHost = document.querySelector('#repair-detail .rep-cold-host');
+  if (coldHost) coldHost.innerHTML = renderRepairColdCheckBlockHtml(c, true);
+  if (pane) pane.scrollTop = savedScroll;
+
+  await patchRepairCaseInline(caseId, { cold_check_json: nextRows }, 'cold', { rollback });
+}
+
+async function deleteColdCheckRowInline(caseId, rowIdx, event) {
+  if (event) event.stopPropagation();
+  const curEd = state.repairInlineEdit;
+  if (curEd && curEd.caseId === caseId && curEd.target === 'cold-cell' && curEd.rowIdx === rowIdx) {
+    curEd.cancelling = true;
+    state.repairInlineEdit = null;
+  } else if (curEd) {
+    await commitActiveRepairInlineEdit();
+  }
+
+  const c = _getRepairCaseById(caseId);
+  if (!c) return;
+  const pane = document.getElementById('repair-detail');
+  const savedScroll = pane ? pane.scrollTop : 0;
+  const isEn = _repairIsEnLang();
+
+  const displayRows = _getDisplayColdRowsForCase(c);
+  const target = displayRows[rowIdx];
+  if (!target) return;
+
+  if (target._isDraft) {
+    const dList = state.repairDraftColdRows[caseId] || [];
+    const dIdx = dList.findIndex((x) => x.id === target.id);
+    if (dIdx >= 0) dList.splice(dIdx, 1);
+    if (!dList.length) delete state.repairDraftColdRows[caseId];
+    const coldHost = document.querySelector('#repair-detail .rep-cold-host');
+    if (coldHost) coldHost.innerHTML = renderRepairColdCheckBlockHtml(c, true);
+    if (pane) pane.scrollTop = savedScroll;
+    if (isEn && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
+    return;
+  }
+
+  const rollback = _cloneRepairBackup(c);
+  const nextRows = displayRows
+    .filter((_, i) => i !== rowIdx)
+    .filter((r) => !r._isDraft && (String(r.item || '').trim() || String(r.result || '').trim()))
+    .map((r, i) => ({
+      id: r.id && !String(r.id).startsWith('cc-draft-') ? r.id : `cc-${i + 1}`,
+      item: String(r.item || '').trim(),
+      result: String(r.result || '').trim(),
+      status: r.status || 'none',
+    }));
+
+  if (state.repairDraftColdRows && state.repairDraftColdRows[caseId]) {
+    delete state.repairDraftColdRows[caseId];
+  }
+  c.cold_check_json = nextRows;
+  c.cold_check_raw = _serializeColdCheckRowsJS(nextRows);
+
+  const coldHost = document.querySelector('#repair-detail .rep-cold-host');
+  if (coldHost) coldHost.innerHTML = renderRepairColdCheckBlockHtml(c, true);
+  if (pane) pane.scrollTop = savedScroll;
+
+  await patchRepairCaseInline(caseId, { cold_check_json: nextRows }, 'cold', { rollback });
+  showToast(isEn ? 'Removed cold check row' : 'Đã xóa dòng đo nguội', 'success');
 }
 
 async function startRepairTitleEdit(caseId) {
@@ -547,41 +959,6 @@ async function startRepairTitleEdit(caseId) {
     rows: 1,
     initialValue: orig,
     placeholder: _repairIsEnLang() ? 'Brand & Model...' : 'Hãng & Mã thiết bị...',
-  });
-}
-
-async function startRepairColdCheckEdit(caseId, useTemplate = false) {
-  const cur = state.repairInlineEdit;
-  if (cur && cur.caseId === caseId && cur.target === 'cold') {
-    if (useTemplate) insertColdCheckTemplateToInline();
-    return;
-  }
-  if (cur) await commitActiveRepairInlineEdit();
-  const c = _getRepairCaseById(caseId);
-  const coldHost = document.querySelector('#repair-detail .rep-cold-host');
-  if (!c || !coldHost) return;
-  const orig = c.cold_check_raw || '';
-  if (!orig.trim()) {
-    coldHost.innerHTML = `
-      <div class="cold-check-card">
-        <div class="cold-check-head">
-          <span>${_repairIsEnLang() ? 'INTAKE &amp; COLD CHECK' : 'TIẾP NHẬN &amp; ĐO NGUỘI (COLD CHECK)'}</span>
-          <span class="rep-head-acts"><span class="rep-save-st" data-save-st="cold"></span></span>
-        </div>
-        <div class="cold-check-body" data-rep-cold-body="${escapeHtml(c.id)}"></div>
-      </div>`;
-  }
-  const bodyEl = coldHost.querySelector(`[data-rep-cold-body="${CSS.escape(caseId)}"]`);
-  if (!bodyEl) return;
-  state.repairInlineEdit = { caseId, target: 'cold', stepIdx: -1, field: 'cold_check_raw', origValue: orig, hostEl: bodyEl, saving: false, cancelling: false };
-  _mountRepairInlineEditor(bodyEl, {
-    target: 'cold',
-    rows: 5,
-    initialValue: orig,
-    useTemplate,
-    placeholder: _repairIsEnLang()
-      ? 'Visual inspection (burn/bulged caps), fuse, rectifier bridge, DC bus, IGBT/MOSFET...'
-      : 'Ghi nhận ngoại quan (cháy nổ/phồng tụ), cầu chì, cầu chỉnh lưu, DC Bus, IGBT/MOSFET...',
   });
 }
 
@@ -652,7 +1029,24 @@ function cancelActiveRepairInlineEdit() {
   const pane = document.getElementById('repair-detail');
   const savedScroll = pane ? pane.scrollTop : 0;
   const c = _getRepairCaseById(ed.caseId);
-  if (c) _restoreFieldHost(ed, c, ed.origValue);
+  if (c) {
+    if (ed.target === 'cold-cell' && ed.isDraft) {
+      const displayRows = _getDisplayColdRowsForCase(c);
+      const targetRow = displayRows[ed.rowIdx];
+      if (targetRow && !String(targetRow.item || '').trim() && !String(targetRow.result || '').trim()) {
+        const dList = state.repairDraftColdRows[ed.caseId] || [];
+        const dIdx = dList.findIndex((x) => x.id === targetRow.id);
+        if (dIdx >= 0) dList.splice(dIdx, 1);
+        if (!dList.length) delete state.repairDraftColdRows[ed.caseId];
+        const coldHost = document.querySelector('#repair-detail .rep-cold-host');
+        if (coldHost) coldHost.innerHTML = renderRepairColdCheckBlockHtml(c, true);
+      } else {
+        _restoreFieldHost(ed, c, ed.origValue);
+      }
+    } else {
+      _restoreFieldHost(ed, c, ed.origValue);
+    }
+  }
   if (pane) pane.scrollTop = savedScroll;
   if (_repairIsEnLang() && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
   return true;
@@ -669,6 +1063,7 @@ function _cloneRepairBackup(c) {
   return {
     brand_model: c.brand_model || '',
     cold_check_raw: c.cold_check_raw || '',
+    cold_check_json: _resolveColdCheckRowsForCase(c).map((r) => ({ ...r })),
     note: c.note || '',
     fault_symptom_raw: c.fault_symptom_raw || '',
     root_cause_raw: c.root_cause_raw || '',
@@ -684,6 +1079,7 @@ function _applyRepairBackup(c, backup) {
   Object.assign(c, {
     brand_model: backup.brand_model,
     cold_check_raw: backup.cold_check_raw,
+    cold_check_json: (backup.cold_check_json || []).map((r) => ({ ...r })),
     note: backup.note,
     fault_symptom_raw: backup.fault_symptom_raw,
     root_cause_raw: backup.root_cause_raw,
@@ -694,14 +1090,108 @@ function _applyRepairBackup(c, backup) {
   });
 }
 
-async function commitActiveRepairInlineEdit() {
+async function commitActiveRepairInlineEdit(options = {}) {
   const ed = state.repairInlineEdit;
   if (!ed || ed.saving || ed.cancelling) return;
+  const pane = document.getElementById('repair-detail');
+  const savedScroll = pane ? pane.scrollTop : 0;
+
+  if (ed.target === 'cold-cell') {
+    const inp = ed.hostEl?.querySelector('.cc-inline-inp, .cc-inline-ta');
+    const nextVal = String(inp ? inp.value : '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+    const origVal = String(ed.origValue || '').trim();
+    state.repairInlineEdit = null;
+    const c = _getRepairCaseById(ed.caseId);
+    if (!c) return;
+
+    const displayRows = _getDisplayColdRowsForCase(c);
+    const targetRow = displayRows[ed.rowIdx];
+    if (!targetRow) return;
+
+    const nextItem = ed.field === 'item' ? nextVal : String(targetRow.item || '').trim();
+    const nextRes = ed.field === 'result' ? nextVal : String(targetRow.result || '').trim();
+    const bothEmpty = !nextItem && !nextRes;
+
+    if (bothEmpty && targetRow._isDraft) {
+      if (options.keepBlankDraftRow) {
+        _restoreFieldHost(ed, c, nextVal);
+        if (options.nextCell) {
+          await startColdCheckCellEdit(options.nextCell.caseId, options.nextCell.rowIdx, options.nextCell.field);
+        }
+        if (pane) pane.scrollTop = savedScroll;
+        return;
+      }
+      const dList = state.repairDraftColdRows[ed.caseId] || [];
+      const dIdx = dList.findIndex((x) => x.id === targetRow.id);
+      if (dIdx >= 0) dList.splice(dIdx, 1);
+      if (!dList.length) delete state.repairDraftColdRows[ed.caseId];
+      const coldHost = document.querySelector('#repair-detail .rep-cold-host');
+      if (coldHost) coldHost.innerHTML = renderRepairColdCheckBlockHtml(c, true);
+      if (options.addRowAfter) {
+        await addColdCheckRowInline(options.addRowAfter.caseId, true, options.addRowAfter.afterIdx);
+      }
+      if (pane) pane.scrollTop = savedScroll;
+      if (_repairIsEnLang() && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
+      return;
+    }
+
+    if (nextVal === origVal && !targetRow._isDraft) {
+      _restoreFieldHost(ed, c, origVal);
+      if (options.nextCell) {
+        await startColdCheckCellEdit(options.nextCell.caseId, options.nextCell.rowIdx, options.nextCell.field);
+      } else if (options.addRowAfter) {
+        await addColdCheckRowInline(options.addRowAfter.caseId, true, options.addRowAfter.afterIdx + 1);
+      }
+      if (pane) pane.scrollTop = savedScroll;
+      if (_repairIsEnLang() && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
+      return;
+    }
+
+    const rollback = _cloneRepairBackup(c);
+    const updatedRows = displayRows
+      .map((r, i) => {
+        if (i !== ed.rowIdx) return r;
+        return { ...r, [ed.field]: nextVal };
+      })
+      .filter((r) => String(r.item || '').trim() || String(r.result || '').trim())
+      .map((r, i) => ({
+        id: r.id && !String(r.id).startsWith('cc-draft-') ? r.id : `cc-${i + 1}`,
+        item: String(r.item || '').trim(),
+        result: String(r.result || '').trim(),
+        status: r.status || 'none',
+      }));
+
+    if (state.repairDraftColdRows && state.repairDraftColdRows[ed.caseId]) {
+      delete state.repairDraftColdRows[ed.caseId];
+    }
+    c.cold_check_json = updatedRows;
+    c.cold_check_raw = _serializeColdCheckRowsJS(updatedRows);
+
+    if (targetRow._isDraft || bothEmpty) {
+      const coldHost = document.querySelector('#repair-detail .rep-cold-host');
+      if (coldHost) coldHost.innerHTML = renderRepairColdCheckBlockHtml(c, true);
+    } else {
+      _restoreFieldHost(ed, c, nextVal);
+    }
+    if (pane) pane.scrollTop = savedScroll;
+
+    const patchPromise = patchRepairCaseInline(ed.caseId, { cold_check_json: updatedRows }, 'cold', { rollback });
+    if (options.nextCell) {
+      const targetIdx = Math.min(options.nextCell.rowIdx, Math.max(0, updatedRows.length - 1));
+      await startColdCheckCellEdit(options.nextCell.caseId, targetIdx, options.nextCell.field);
+    } else if (options.addRowAfter) {
+      const insIdx = bothEmpty
+        ? Math.min(options.addRowAfter.afterIdx, updatedRows.length)
+        : Math.min(options.addRowAfter.afterIdx + 1, updatedRows.length);
+      await addColdCheckRowInline(options.addRowAfter.caseId, true, insIdx);
+    }
+    await patchPromise;
+    return;
+  }
+
   const ta = ed.hostEl?.querySelector('.rep-inline-ta');
   const nextVal = String(ta ? ta.value : '').trim();
   const origVal = String(ed.origValue || '').trim();
-  const pane = document.getElementById('repair-detail');
-  const savedScroll = pane ? pane.scrollTop : 0;
 
   if (ed.target === 'title' && !nextVal) {
     showToast(_repairIsEnLang() ? 'Brand & Model cannot be empty' : 'Tên hãng & mã thiết bị không được để trống', 'error');
@@ -731,11 +1221,6 @@ async function commitActiveRepairInlineEdit() {
     patchPayload = { brand_model: nextVal };
     statusKey = 'title';
     _restoreTitleHost(ed.hostEl, c);
-  } else if (ed.target === 'cold') {
-    c.cold_check_raw = nextVal;
-    patchPayload = { cold_check_raw: nextVal };
-    statusKey = 'cold';
-    _restoreFieldHost(ed, c, nextVal);
   } else if (ed.target === 'note') {
     c.note = nextVal;
     patchPayload = { note: nextVal };
@@ -797,9 +1282,30 @@ function _syncRepairDetailBlocksAfterPatch(saved, opts = {}) {
     tagsBar.innerHTML = renderRepairInteractiveTagsHtml(saved, true);
   }
 
-  if (!(ed && ed.caseId === saved.id && ed.target === 'cold')) {
-    const coldHost = root.querySelector('.rep-cold-host');
-    if (coldHost) coldHost.innerHTML = renderRepairColdCheckBlockHtml(saved, true);
+  const coldHost = root.querySelector('.rep-cold-host');
+  if (coldHost) {
+    if (ed && ed.caseId === saved.id && ed.target === 'cold-cell') {
+      const displayRows = _getDisplayColdRowsForCase(saved);
+      const isEn = _repairIsEnLang();
+      const countMetaEl = coldHost.querySelector('.cc-count-meta');
+      if (countMetaEl) countMetaEl.innerHTML = _coldCheckCountMetaHtml(displayRows, isEn);
+      displayRows.forEach((r, idx) => {
+        ['item', 'result'].forEach((fld) => {
+          if (ed.rowIdx === idx && ed.field === fld) return;
+          const cell = coldHost.querySelector(`.cc-cell[data-cc-idx="${idx}"][data-cc-field="${fld}"]`);
+          if (cell) {
+            const ph = fld === 'item'
+              ? (isEn ? 'Component...' : 'Thành phần...')
+              : (isEn ? 'Measurement / Result...' : 'Kết quả / Thông số đo...');
+            delete cell.dataset.viHtmlOrig;
+            delete cell.dataset.viTextOrig;
+            cell.innerHTML = _coldCheckCellHtml(r[fld], saved, ph);
+          }
+        });
+      });
+    } else {
+      coldHost.innerHTML = renderRepairColdCheckBlockHtml(saved, true);
+    }
   }
 
   if (!(ed && ed.caseId === saved.id && ed.target === 'note')) {

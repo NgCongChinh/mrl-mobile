@@ -648,8 +648,16 @@ const UI_I18N_MAP = {
   '← Quay lại danh sách': '← Back to list',
   '📷 Chụp ảnh Bo mạch / Máy đo': '📷 Capture PCBA / Meter Photo',
   'TIẾP NHẬN & ĐO NGUỘI (COLD CHECK)': 'INTAKE & COLD CHECK',
+  '+ Thêm đo nguội (Cold Check)': '+ Add Cold Check',
   '+ Thêm ngoại quan & đo nguội (Cold Check)': '+ Add visual & cold check notes',
   '⚡ Chèn mẫu đo nguội': '⚡ Insert Cold Check Template',
+  '⚡ Mẫu đo nguội': '⚡ Template',
+  '+ Thêm dòng': '+ Add row',
+  'THÀNH PHẦN KIỂM TRA': 'COMPONENT / CHECKPOINT',
+  'KẾT QUẢ / THÔNG SỐ ĐO': 'RESULT / MEASUREMENTS',
+  'TRẠNG THÁI': 'STATUS',
+  'Nghi ngờ': 'Suspect',
+  'Hỏng': 'Fault',
   '+ Thêm lưu ý cấp nguồn test (24VDC / DC bus, chân jump, dòng boot...)': '+ Add bench power-up & config notes (24VDC / DC bus, jumper, boot current...)',
   '+ Mã lỗi': '+ Fault Code',
   '+ Linh kiện': '+ Component',
@@ -722,6 +730,10 @@ const PLACEHOLDER_I18N_MAP = {
   'Nguyên nhân gốc rễ...': 'Root cause...',
   'Cách xử lý & Linh kiện...': 'Solution & Components...',
   'Hãng & Mã thiết bị...': 'Brand & Model...',
+  'Thành phần kiểm tra...': 'Component / Checkpoint...',
+  'Kết quả / Thông số đo (Enter xuống dòng, Ctrl+Enter thêm dòng)...': 'Result / Measurements (Enter newline, Ctrl+Enter new row)...',
+  'Thành phần (VD: Tụ lọc, Opto)...': 'Component (e.g. Cap, Opto)...',
+  'Thông số đo / Kết quả...': 'Measurement / Result...',
 };
 
 let _SORTED_I18N_ENTRIES = null;
@@ -1050,6 +1062,8 @@ function _translateUiLeafNodes(rootEl, toEn) {
     '[data-no-i18n="1"]',
     '.detail-canvas-text',
     '.detail-pane .cold-check-body',
+    '.detail-pane .cc-cell-item',
+    '.detail-pane .cc-cell-result',
     '.detail-pane .warn-body',
     '.detail-pane .nb-body',
     '.rep-inline-editor',
@@ -1258,6 +1272,8 @@ async function translateVisibleRecordContentToEn() {
     '#app-shell .detail-pane .d-title',
     '#app-shell .detail-pane .detail-canvas-text',
     '#app-shell .detail-pane .cold-check-body',
+    '#app-shell .detail-pane .cc-cell-item',
+    '#app-shell .detail-pane .cc-cell-result',
     '#app-shell .detail-pane .warn-body',
     '#app-shell .detail-pane .nb-body',
     '#app-shell .detail-pane .spec-v',
@@ -1281,7 +1297,7 @@ async function translateVisibleRecordContentToEn() {
     }
     const rawText = (el.dataset.viTextOrig || '').trim();
     if (!rawText) return;
-    const isMultiLine = el.classList.contains('detail-canvas-text') || el.classList.contains('cold-check-body') || el.classList.contains('warn-body') || el.classList.contains('nb-body') || el.classList.contains('spec-v') || el.classList.contains('fc-question-text');
+    const isMultiLine = el.classList.contains('detail-canvas-text') || el.classList.contains('cold-check-body') || el.classList.contains('cc-cell-result') || el.classList.contains('warn-body') || el.classList.contains('nb-body') || el.classList.contains('spec-v') || el.classList.contains('fc-question-text');
     const lines = isMultiLine ? String(el.dataset.viTextOrig).split('\n') : [rawText];
     targets.push({ el, lines, isPlainTitle: el.classList.contains('row-title') || el.classList.contains('row-step-count') || el.classList.contains('d-title') || el.tagName === 'SPAN' || el.tagName === 'LI' });
   });

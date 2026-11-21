@@ -92,6 +92,7 @@ const state = {
   repairInlineEdit: null,
   repairTagAdd: null,
   repairDraftSteps: {},
+  repairDraftColdRows: {},
   tagsDictionary: { component_tags: [], fault_codes: [] },
   selectedRepairId: null,
   selectedKnowledgeId: null,

@@ -394,6 +394,11 @@
   function _refreshDerivedFields(snap) {
     if (!snap || typeof snap !== 'object') return snap;
     const reps = snap.repair_cases || [];
+    reps.forEach((r) => {
+      if (!r || typeof r !== 'object') return;
+      r.cold_check_raw = String(r.cold_check_raw || '');
+      r.cold_check_json = resolveColdCheckRows(r.cold_check_json, r.cold_check_raw);
+    });
     const knws = snap.knowledge_items || [];
     const plcs = snap.plc_notes || [];
     const nets = snap.network_notes || [];
@@ -1482,6 +1487,175 @@
       }));
   }
 
+  const _CC_VALID_STATUSES_JS = new Set(['none', 'ok', 'suspect', 'fault']);
+  const _CC_WORD_CHAR_JS = 'a-z0-9\\u00e0-\\u1ef9';
+  const _CC_BOUNDARY_L_JS = `(?:^|[^${_CC_WORD_CHAR_JS}])`;
+  const _CC_BOUNDARY_R_JS = `(?=$|[^${_CC_WORD_CHAR_JS}])`;
+  const _CC_NEG_PREFIX_RE_JS = new RegExp(`${_CC_BOUNDARY_L_JS}(?:không|khong|ko|k|chưa|chua|no|not)$`);
+  const _CC_FAULT_SRC_JS = `${_CC_BOUNDARY_L_JS}(?:cháy|nổ|chập|đứt|hỏng|chết|short|blown|burned|burnt|damaged|fault)${_CC_BOUNDARY_R_JS}`;
+  const _CC_SUSPECT_SRC_JS = `${_CC_BOUNDARY_L_JS}(?:nghi|lệch|yếu|khô|cao|suspect|weak|drift|high\\s+esr)${_CC_BOUNDARY_R_JS}`;
+  const _CC_OK_NO_NEG_RE_JS = new RegExp(`${_CC_BOUNDARY_L_JS}(?:không\\s+short|khong\\s+short|k\\s+short|ko\\s+short|đều\\s+nhau)${_CC_BOUNDARY_R_JS}`);
+  const _CC_OK_SRC_JS = `${_CC_BOUNDARY_L_JS}(?:ok|tốt|sống|bình\\s+thường|good|normal|pass)${_CC_BOUNDARY_R_JS}`;
+  const _CC_SPLIT_ARROW_RE_JS = /\s+(?:-|–|—|->|→)\s+/;
+  const _CC_PREDICATE_RE_JS = new RegExp(
+    `^(.+?)\\s+((?:`
+    + `đo\\s+nguội|đo\\s+diode|đo\\s+thông|đo\\s+trở|đo\\s+esr|đo\\s+|kiểm\\s+tra|`
+    + `không\\s+|khong\\s+|ko\\s+|k\\s+|chưa\\s+|đã\\s+|bị\\s+|có\\s+dấu\\s+hiệu|`
+    + `cháy|nổ|chập|đứt|hỏng|chết|rò|phồng|xì|bong|gãy|nứt|lệch|yếu|khô|nghi|`
+    + `ok${_CC_BOUNDARY_R_JS}|tốt${_CC_BOUNDARY_R_JS}|sống${_CC_BOUNDARY_R_JS}|bình\\s+thường|đều\\s+nhau|`
+    + `short${_CC_BOUNDARY_R_JS}|open${_CC_BOUNDARY_R_JS}|blown${_CC_BOUNDARY_R_JS}|burned${_CC_BOUNDARY_R_JS}|`
+    + `burnt${_CC_BOUNDARY_R_JS}|damaged${_CC_BOUNDARY_R_JS}|fault${_CC_BOUNDARY_R_JS}|suspect${_CC_BOUNDARY_R_JS}|`
+    + `good${_CC_BOUNDARY_R_JS}|normal${_CC_BOUNDARY_R_JS}`
+    + `).*)$`,
+    'i'
+  );
+  const _CC_WORD_CHAR_ONE_RE_JS = new RegExp(`[${_CC_WORD_CHAR_JS}]`);
+
+  function _ccHasUnnegatedMatchJS(low, source) {
+    const re = new RegExp(source, 'g');
+    let m;
+    while ((m = re.exec(low)) !== null) {
+      let pos = m.index;
+      if (pos < low.length && !_CC_WORD_CHAR_ONE_RE_JS.test(low[pos])) {
+        pos += 1;
+      }
+      const prefix = low.slice(Math.max(0, pos - 16), pos).trimEnd();
+      if (!_CC_NEG_PREFIX_RE_JS.test(prefix)) return true;
+      if (m[0].length === 0) re.lastIndex += 1;
+    }
+    return false;
+  }
+
+  function _inferColdCheckStatusJS(resultText) {
+    const low = String(resultText || '').toLowerCase();
+    if (!low.trim()) return 'none';
+    if (_ccHasUnnegatedMatchJS(low, _CC_FAULT_SRC_JS)) return 'fault';
+    if (_ccHasUnnegatedMatchJS(low, _CC_SUSPECT_SRC_JS)) return 'suspect';
+    if (_CC_OK_NO_NEG_RE_JS.test(low) || _ccHasUnnegatedMatchJS(low, _CC_OK_SRC_JS)) return 'ok';
+    return 'none';
+  }
+
+  function _splitColdCheckItemResultJS(body) {
+    const clean = String(body || '').trim();
+    if (!clean) return ['', ''];
+    const colonIdx = clean.indexOf(':');
+    if (colonIdx > 0) {
+      const left = clean.slice(0, colonIdx).trim();
+      const right = clean.slice(colonIdx + 1).trim();
+      if (left) return [left, right];
+    }
+    const arrowM = _CC_SPLIT_ARROW_RE_JS.exec(clean);
+    if (arrowM) {
+      const left = clean.slice(0, arrowM.index).trim();
+      const right = clean.slice(arrowM.index + arrowM[0].length).trim();
+      if (left) return [left, right];
+    }
+    const predM = _CC_PREDICATE_RE_JS.exec(clean);
+    if (predM) {
+      const item = String(predM[1] || '').trim();
+      const res = String(predM[2] || '').trim();
+      if (item) return [item, res];
+    }
+    return [clean, ''];
+  }
+
+  function normalizeColdCheckRows(rawRows) {
+    let arr = rawRows;
+    if (typeof arr === 'string') {
+      const s = arr.trim();
+      if (!s) return [];
+      try { arr = JSON.parse(s); } catch (_) { return []; }
+    }
+    if (!Array.isArray(arr)) return [];
+    const out = [];
+    for (const d of arr) {
+      if (!d || typeof d !== 'object') continue;
+      const item = String(d.item || '').trim();
+      const result = String(d.result || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+      if (!item && !result) continue;
+      let status = String(d.status || 'none').trim().toLowerCase();
+      if (!_CC_VALID_STATUSES_JS.has(status)) status = 'none';
+      const id = String(d.id || '').trim() || `cc-${out.length + 1}`;
+      out.push({ id, item, result, status });
+    }
+    return out;
+  }
+
+  function parseColdCheckTextToRows(rawText) {
+    if (!rawText || !String(rawText).trim()) return [];
+    const text = String(rawText).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const rows = [];
+    let current = null;
+    let acceptsChildBullets = false;
+
+    for (const line of text.split('\n')) {
+      const rawLine = line.replace(/\s+$/, '');
+      const stripped = rawLine.trim();
+      if (!stripped || /^[\-–—•*]+$/.test(stripped)) continue;
+
+      const mNum = rawLine.match(/^\s*\d+[\.\)]\s+(.+)$/);
+      const isBullet = /^\s*[-•*]\s+/.test(rawLine);
+      const isIndented = /^(?:\t|\s{2,})\S/.test(rawLine);
+
+      if (mNum) {
+        const [item, res] = _splitColdCheckItemResultJS(mNum[1].trim());
+        current = { item, result: res };
+        rows.push(current);
+        acceptsChildBullets = true;
+      } else if (current && (isIndented || (isBullet && acceptsChildBullets))) {
+        current.result = current.result ? `${current.result}\n${stripped}` : stripped;
+      } else if (isBullet) {
+        const body = rawLine.replace(/^\s*[-•*]\s+/, '').trim();
+        const [item, res] = _splitColdCheckItemResultJS(body);
+        current = { item, result: res };
+        rows.push(current);
+        acceptsChildBullets = (res === '');
+      } else if (stripped.includes(':') || !current) {
+        const [item, res] = _splitColdCheckItemResultJS(stripped);
+        current = { item, result: res };
+        rows.push(current);
+        acceptsChildBullets = (res === '');
+      } else {
+        current.result = current.result ? `${current.result}\n${stripped}` : stripped;
+      }
+    }
+
+    const out = [];
+    for (const r of rows) {
+      const item = String(r.item || '').trim();
+      const result = String(r.result || '').trim();
+      if (!item && !result) continue;
+      out.push({
+        id: `cc-${out.length + 1}`,
+        item,
+        result,
+        status: _inferColdCheckStatusJS(result),
+      });
+    }
+    return out;
+  }
+
+  function serializeColdCheckRowsToText(rows) {
+    const norm = normalizeColdCheckRows(rows);
+    if (!norm.length) return '';
+    return norm.map((r, idx) => {
+      const n = idx + 1;
+      if (r.item && r.result) {
+        return r.result.includes('\n')
+          ? `${n}. ${r.item} :\n${r.result}`
+          : `${n}. ${r.item} : ${r.result}`;
+      }
+      return `${n}. ${r.item || r.result}`;
+    }).join('\n');
+  }
+
+  function resolveColdCheckRows(rawRows, rawText = '') {
+    const rows = normalizeColdCheckRows(rawRows);
+    if (rows.length) return rows;
+    if (String(rawText || '').trim()) return parseColdCheckTextToRows(rawText);
+    return [];
+  }
+
   async function _parseBody(init) {
     if (!init || !init.body) return {};
     if (typeof FormData !== 'undefined' && init.body instanceof FormData) return init.body;
@@ -1532,7 +1706,15 @@
       const id = (body.id || '').trim() || _nextSeqId(snap.repair_cases, 'REP');
       const [sc, sl] = _normalizeStatus(body.status_code);
       const brandModel = String(body.brand_model || '').trim() || id;
-      const coldCheckRaw = String(body.cold_check_raw || '').trim();
+      let coldRows = [];
+      let coldCheckRaw = '';
+      if (Array.isArray(body.cold_check_json)) {
+        coldRows = normalizeColdCheckRows(body.cold_check_json);
+        coldCheckRaw = serializeColdCheckRowsToText(coldRows);
+      } else {
+        coldCheckRaw = String(body.cold_check_raw || '').trim();
+        coldRows = parseColdCheckTextToRows(coldCheckRaw);
+      }
       const noteRaw = String(body.note || '').trim();
       let steps = _normalizeRepairStepsJS(body.steps || []);
       let faultRaw = String(body.fault_symptom_raw || '').trim();
@@ -1555,6 +1737,7 @@
         device_category: body.device_category || 'VFD',
         brand_model: brandModel,
         cold_check_raw: coldCheckRaw,
+        cold_check_json: coldRows,
         fault_symptom_raw: faultRaw,
         root_cause_raw: causeRaw,
         solution_raw: solutionRaw,
@@ -1584,9 +1767,18 @@
         nextBrand = String(body.brand_model).trim();
         if (!nextBrand) return _jsonResponse({ detail: 'Tên hãng & mã thiết bị không được để trống' }, 400);
       }
-      const nextCold = (body.cold_check_raw !== undefined && body.cold_check_raw !== null)
-        ? String(body.cold_check_raw).trim()
-        : (cur.cold_check_raw || '');
+      let nextColdRows;
+      let nextCold;
+      if (Array.isArray(body.cold_check_json)) {
+        nextColdRows = normalizeColdCheckRows(body.cold_check_json);
+        nextCold = serializeColdCheckRowsToText(nextColdRows);
+      } else if (body.cold_check_raw !== undefined && body.cold_check_raw !== null) {
+        nextCold = String(body.cold_check_raw).trim();
+        nextColdRows = parseColdCheckTextToRows(nextCold);
+      } else {
+        nextCold = cur.cold_check_raw || '';
+        nextColdRows = resolveColdCheckRows(cur.cold_check_json, nextCold);
+      }
       const nextNote = (body.note !== undefined && body.note !== null)
         ? String(body.note).trim()
         : (cur.note || '');
@@ -1612,7 +1804,9 @@
       if (!body.skip_auto_extract) {
         const changedParts = [];
         if (body.brand_model !== undefined && body.brand_model !== null) changedParts.push(nextBrand);
-        if (body.cold_check_raw !== undefined && body.cold_check_raw !== null) changedParts.push(nextCold);
+        if (Array.isArray(body.cold_check_json) || (body.cold_check_raw !== undefined && body.cold_check_raw !== null)) {
+          changedParts.push(nextCold);
+        }
         if (body.note !== undefined && body.note !== null) changedParts.push(nextNote);
         if (Array.isArray(body.steps)) {
           changedParts.push(nextSteps.map((s) => `${s.symptom} ${s.root_cause} ${s.solution}`).join(' '));
@@ -1624,6 +1818,7 @@
         ...cur,
         brand_model: nextBrand,
         cold_check_raw: nextCold,
+        cold_check_json: nextColdRows,
         fault_symptom_raw: nextFaultRaw,
         root_cause_raw: nextCauseRaw,
         solution_raw: nextSolRaw,
@@ -1658,7 +1853,18 @@
         const cur = snap.repair_cases[idx];
         const [sc, sl] = _normalizeStatus(body.status_code);
         const brandModel = String(body.brand_model !== undefined ? body.brand_model : (cur.brand_model || id)).trim() || id;
-        const coldCheckRaw = String(body.cold_check_raw !== undefined ? body.cold_check_raw : (cur.cold_check_raw || '')).trim();
+        let coldRows;
+        let coldCheckRaw;
+        if (Array.isArray(body.cold_check_json)) {
+          coldRows = normalizeColdCheckRows(body.cold_check_json);
+          coldCheckRaw = serializeColdCheckRowsToText(coldRows);
+        } else if (body.cold_check_raw !== undefined && body.cold_check_raw !== null) {
+          coldCheckRaw = String(body.cold_check_raw).trim();
+          coldRows = parseColdCheckTextToRows(coldCheckRaw);
+        } else {
+          coldCheckRaw = cur.cold_check_raw || '';
+          coldRows = resolveColdCheckRows(cur.cold_check_json, coldCheckRaw);
+        }
         const noteRaw = String(body.note !== undefined ? body.note : (cur.note || '')).trim();
         const steps = Array.isArray(body.steps) ? _normalizeRepairStepsJS(body.steps) : (cur.steps || []);
         const [fR, cR, sR] = _formatRepairStepsRawJS(steps);
@@ -1674,6 +1880,7 @@
           id,
           brand_model: brandModel,
           cold_check_raw: coldCheckRaw,
+          cold_check_json: coldRows,
           fault_symptom_raw: faultRaw,
           root_cause_raw: causeRaw,
           solution_raw: solutionRaw,
@@ -3119,6 +3326,10 @@
     utcNowIso,
     evaluateFlashcardOffline: evaluateFlashcardOfflineJS,
     followUpFlashcardOffline: buildFlashcardFollowUpOfflineJS,
+    normalizeColdCheckRows,
+    parseColdCheckTextToRows,
+    serializeColdCheckRowsToText,
+    resolveColdCheckRows,
   };
 
   window.MRLSyncEngine = {
