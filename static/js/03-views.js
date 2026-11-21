@@ -189,14 +189,24 @@ function renderRepairsView() {
 function _repairCellBodyHtml(value, c) {
   const cleanVal = String(value || '').trim();
   return cleanVal
-    ? highlightTagsHtml(cleanVal, c.component_tags, c.fault_codes)
+    ? highlightTagsHtml(cleanVal, c?.component_tags, c?.fault_codes)
     : '<span class="none">— Chưa ghi nhận —</span>';
 }
 
 function specRow(cls, field, key, value, c, stepIdx, inline = true) {
-  const cid = escapeHtml(c.id);
+  // Backward-compatible guard for legacy 4-arg calls: specRow(cls, key, value, c)
+  if (c === undefined && value && typeof value === 'object' && 'id' in value) {
+    c = value;
+    value = key;
+    key = field;
+    field = cls;
+    stepIdx = 0;
+    inline = false;
+  }
+  const cid = escapeHtml(c?.id || '');
   const body = _repairCellBodyHtml(value, c);
-  const attrs = inline
+  const canInline = Boolean(inline && cid && typeof stepIdx === 'number');
+  const attrs = canInline
     ? `class="spec-v rep-editable" data-step-idx="${stepIdx}" data-step-field="${field}" onclick="onRepairEditableClick(event, function(){ startRepairStepFieldEdit('${cid}', ${stepIdx}, '${field}'); })"`
     : `class="spec-v"`;
   return `<div class="spec-row ${cls}"><div class="spec-k">${key}</div><div ${attrs}>${body}</div></div>`;

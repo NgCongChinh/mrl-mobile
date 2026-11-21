@@ -277,7 +277,7 @@ function _buildDeepCardsForItem(kind, item) {
         hint: (item.fault_codes || []).length ? `Mã lỗi liên quan: ${(item.fault_codes || []).join(', ')}` : '',
         answerText: [cause ? `Nguyên nhân: ${cause}` : '', sol ? `Xử lý: ${sol}` : ''].filter(Boolean).join('\n'),
         answerHtml: `<div class="trace"><div class="step"><div class="step-head">BƯỚC ${pad2(st.step_order || idx + 1)}</div><div class="spec">
-          ${specRow('cause', 'Nguyên nhân gốc rễ', cause, item)}${specRow('sol', 'Cách xử lý & Linh kiện', sol, item)}</div></div></div>`,
+          ${specRow('cause', 'root_cause', 'Nguyên nhân gốc rễ', cause, item, idx, false)}${specRow('sol', 'solution', 'Cách xử lý & Linh kiện', sol, item, idx, false)}</div></div></div>`,
       });
     });
     if ((item.note || '').trim().length > 10) {
@@ -1435,7 +1435,7 @@ function _renderSummaryFlashcard(card, flipped) {
     const back = `<div class="fc-answer stack">
       ${c.note ? `<div class="warn"><div class="warn-title"><span>LƯU Ý CẤP NGUỒN TEST &amp; CẤU HÌNH VẬN HÀNH</span></div><div class="warn-body">${highlightTagsHtml(c.note, c.component_tags, c.fault_codes)}</div></div>` : ''}
       <div class="trace">${steps.map((st, i) => `<div class="step"><div class="step-head">BƯỚC ${pad2(st.step_order || i + 1)}</div><div class="spec">
-        ${specRow('cause', 'Nguyên nhân gốc rễ', st.root_cause, c)}${specRow('sol', 'Cách xử lý & Linh kiện', st.solution, c)}</div></div>`).join('')}</div>
+        ${specRow('cause', 'root_cause', 'Nguyên nhân gốc rễ', st.root_cause, c, i, false)}${specRow('sol', 'solution', 'Cách xử lý & Linh kiện', st.solution, c, i, false)}</div></div>`).join('')}</div>
       ${c.component_tags?.length ? `<div class="tags">${renderTagPills(c.component_tags, [])}</div>` : ''}</div>`;
     return { front, back };
   }
