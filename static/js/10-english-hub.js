@@ -2158,8 +2158,11 @@ async function openAiConfigModal() {
     if (res.ok) {
       const cfg = await res.json();
       state.hasGeminiKey = Boolean(cfg.has_key);
-      state.geminiModel = cfg.model || 'gemini-2.5-flash';
-      if (modelSel) modelSel.value = state.geminiModel;
+      state.geminiModel = cfg.model || 'gemini-3.5-flash-lite';
+      if (modelSel) {
+        const hasOpt = Array.from(modelSel.options || []).some((o) => o.value === state.geminiModel);
+        modelSel.value = hasOpt ? state.geminiModel : 'gemini-3.5-flash-lite';
+      }
       if (statusEl) {
         statusEl.innerHTML = cfg.has_key
           ? (isEn
@@ -2183,7 +2186,7 @@ function closeAiConfigModal() {
 async function testAiConfigConnection() {
   const isEn = state.appLang === 'en';
   const key = (document.getElementById('ai-cfg-key-input')?.value || '').trim();
-  const model = document.getElementById('ai-cfg-model-select')?.value || 'gemini-2.5-flash';
+  const model = document.getElementById('ai-cfg-model-select')?.value || 'gemini-3.5-flash-lite';
   const btn = document.getElementById('ai-cfg-test-btn');
   const box = document.getElementById('ai-cfg-test-result');
   const effectiveKey = key || (state.hasGeminiKey ? '__KEEP__' : '');
@@ -2213,8 +2216,11 @@ async function testAiConfigConnection() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ gemini_api_key: effectiveKey, gemini_model: model }),
     });
-    const data = await res.json().catch(() => ({}));
-    if (data.ok) {
+    const rawTxt = await res.text().catch(() => '');
+    let data = {};
+    try { data = rawTxt ? JSON.parse(rawTxt) : {}; } catch (_) { data = {}; }
+
+    if (res.ok && data.ok) {
       const msg = isEn
         ? `✓ Connected successfully (Model: ${data.model || model}${data.endpoint ? ' · ' + data.endpoint : ''})`
         : `✓ Kết nối thành công (Model: ${data.model || model}${data.endpoint ? ' · ' + data.endpoint : ''})`;
@@ -2225,16 +2231,25 @@ async function testAiConfigConnection() {
       }
       showToast(msg, 'success');
     } else {
-      const errMsg = data.error || (isEn ? 'Connection failed' : 'Kết nối thất bại');
+      let errMsg = '';
+      if (!res.ok) {
+        const detail = String(data.error || data.detail || rawTxt.slice(0, 220) || res.statusText || 'Lỗi máy chủ').trim();
+        errMsg = `HTTP ${res.status}: ${detail}`;
+        if (res.status === 404 && detail.toLowerCase() === 'not found') {
+          errMsg += ' — Bản NC38.exe đang mở là bản cũ, hãy đóng và chạy lại bản mới.';
+        }
+      } else {
+        errMsg = String(data.error || (data.http_status ? `HTTP ${data.http_status}: Lỗi máy chủ AI` : (rawTxt.slice(0, 220) || 'Lỗi không xác định từ máy chủ AI'))).trim();
+      }
       if (box) {
         box.style.color = 'var(--red)';
         box.style.borderColor = 'var(--red)';
         box.textContent = `✕ ${errMsg}`;
       }
-      showToast(`AI Test thất bại: ${errMsg}`, 'error');
+      showToast(`AI Test lỗi: ${errMsg}`, 'error');
     }
   } catch (err) {
-    const msg = err?.message || 'Lỗi mạng';
+    const msg = `Lỗi kết nối mạng: ${err?.message || 'Network error'}`;
     if (box) {
       box.style.color = 'var(--red)';
       box.style.borderColor = 'var(--red)';
@@ -2253,7 +2268,7 @@ async function submitAiConfigForm(ev) {
   ev.preventDefault();
   const isEn = state.appLang === 'en';
   const key = (document.getElementById('ai-cfg-key-input')?.value || '').trim();
-  const model = document.getElementById('ai-cfg-model-select')?.value || 'gemini-2.5-flash';
+  const model = document.getElementById('ai-cfg-model-select')?.value || 'gemini-3.5-flash-lite';
   try {
     const res = await fetch('/api/english/ai-config', {
       method: 'POST',
@@ -2279,7 +2294,7 @@ async function clearGeminiApiKey() {
     await fetch('/api/english/ai-config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ gemini_api_key: '', gemini_model: state.geminiModel || 'gemini-2.0-flash' }),
+      body: JSON.stringify({ gemini_api_key: '', gemini_model: state.geminiModel || 'gemini-3.5-flash-lite' }),
     });
     state.hasGeminiKey = false;
     _syncAiKeyButtons();

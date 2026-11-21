@@ -635,6 +635,13 @@
   // -------------------------------------------------------------------------
   // AI Config & Gemini/Vertex Client (Direct Browser Offline Fallback)
   // -------------------------------------------------------------------------
+  const GEMINI_FALLBACK_MODELS = [
+    'gemini-3.5-flash-lite',
+    'gemini-flash-lite-latest',
+    'gemini-3.1-flash-lite',
+    'gemini-3.8-flash',
+  ];
+
   function getAiConfig() {
     try {
       const raw = localStorage.getItem(AI_CFG_KEY);
@@ -643,18 +650,18 @@
         if (parsed && typeof parsed === 'object') {
           return {
             gemini_api_key: String(parsed.gemini_api_key || ''),
-            gemini_model: String(parsed.gemini_model || 'gemini-2.5-flash') || 'gemini-2.5-flash',
+            gemini_model: String(parsed.gemini_model || 'gemini-3.5-flash-lite') || 'gemini-3.5-flash-lite',
           };
         }
       }
     } catch (_) { /* ignore */ }
-    return { gemini_api_key: '', gemini_model: 'gemini-2.5-flash' };
+    return { gemini_api_key: '', gemini_model: 'gemini-3.5-flash-lite' };
   }
 
   function saveAiConfig(key, model) {
     const prev = getAiConfig();
     const nextKey = key === '__KEEP__' ? (prev.gemini_api_key || '') : String(key || '').trim();
-    const nextModel = String(model || prev.gemini_model || 'gemini-2.5-flash').trim() || 'gemini-2.5-flash';
+    const nextModel = String(model || prev.gemini_model || 'gemini-3.5-flash-lite').trim() || 'gemini-3.5-flash-lite';
     try { localStorage.setItem(AI_CFG_KEY, JSON.stringify({ gemini_api_key: nextKey, gemini_model: nextModel })); } catch (_) {}
     return { gemini_api_key: nextKey, gemini_model: nextModel };
   }
@@ -668,9 +675,10 @@
       detail = '';
     }
     if (!detail) detail = String(rawText || '').replace(/\s+/g, ' ').trim();
-    detail = detail.slice(0, 180);
+    detail = detail.slice(0, 240);
     if (status === 429) return detail ? `HTTP 429: Quá giới hạn miễn phí (${detail})` : 'HTTP 429: Quá giới hạn miễn phí';
     if (status === 404) return detail ? `HTTP 404: Model not found (${detail})` : 'HTTP 404: Model not found';
+    if (status === 503) return detail ? `HTTP 503: Model đang quá tải tạm thời (${detail})` : 'HTTP 503: Model đang quá tải tạm thời';
     return detail ? `HTTP ${status}: ${detail}` : `HTTP ${status}`;
   }
 
@@ -694,91 +702,104 @@
     const cfg = getAiConfig();
     const rawOv = String(overrideKey || '').trim();
     const key = (rawOv && rawOv !== '__KEEP__') ? rawOv : String(cfg.gemini_api_key || '').trim();
-    const reqModel = String(overrideModel || cfg.gemini_model || 'gemini-2.5-flash').trim() || 'gemini-2.5-flash';
-    if (!key) return { data: null, error: 'Chưa cấu hình Gemini API Key', model: reqModel, endpoint: '' };
+    const reqModel = String(overrideModel || cfg.gemini_model || 'gemini-3.5-flash-lite').trim() || 'gemini-3.5-flash-lite';
+    if (!key) return { data: null, error: 'Chưa cấu hình Gemini API Key', model: reqModel, endpoint: '', http_status: 0 };
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      return { data: null, error: 'Thiết bị đang ngoại tuyến (Mất kết nối mạng)', model: reqModel, endpoint: '' };
+      return { data: null, error: 'Thiết bị đang ngoại tuyến (Mất kết nối mạng)', model: reqModel, endpoint: '', http_status: 0 };
     }
 
     const payloadBody = JSON.stringify({
       contents: [{ role: 'user', parts: [{ text: promptText }] }],
       generationConfig: { temperature: 0.35, responseMimeType: 'application/json' },
     });
-
-    const modelsToTry = [reqModel];
-    if (reqModel !== 'gemini-2.5-flash') modelsToTry.push('gemini-2.5-flash');
+    const stdHeaders = { 'Content-Type': 'application/json', 'x-goog-api-key': key };
+    const modelsToTry = [reqModel, ...GEMINI_FALLBACK_MODELS.filter((m) => m !== reqModel)];
 
     let lastError = '';
-    let lastEp = '';
+    let lastStatus = 0;
+    let lastEp = 'Google AI Studio';
+    let timeoutRetried = false;
 
-    for (const mName of modelsToTry) {
-      let saw404 = false;
+    for (let idx = 0; idx < modelsToTry.length;) {
+      const mName = modelsToTry[idx];
+      idx += 1;
       const encModel = encodeURIComponent(mName);
-      const encKey = encodeURIComponent(key);
-      const attempts = key.startsWith('AQ.')
-        ? [
-            {
-              label: 'Vertex AI Express',
-              url: `https://aiplatform.googleapis.com/v1/publishers/google/models/${encModel}:generateContent?key=${encKey}`,
-              headers: { 'Content-Type': 'application/json' },
-            },
-            {
-              label: 'Google AI Studio (Header)',
-              url: `https://generativelanguage.googleapis.com/v1beta/models/${encModel}:generateContent`,
-              headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-            },
-          ]
-        : [
-            {
-              label: 'Google AI Studio',
-              url: `https://generativelanguage.googleapis.com/v1beta/models/${encModel}:generateContent?key=${encKey}`,
-              headers: { 'Content-Type': 'application/json' },
-            },
-          ];
+      const glaUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encModel}:generateContent`;
+      lastEp = 'Google AI Studio';
 
-      for (let i = 0; i < attempts.length; i += 1) {
-        const att = attempts[i];
-        lastEp = att.label;
-        const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-        const timer = ctrl ? setTimeout(() => { try { ctrl.abort(); } catch (_) {} }, 18000) : null;
-        try {
-          const fetchOpts = { method: 'POST', headers: att.headers, body: payloadBody };
-          if (ctrl) fetchOpts.signal = ctrl.signal;
-          const res = await _nativeFetch(att.url, fetchOpts);
-          if (!res.ok) {
-            const errRaw = await res.text().catch(() => '');
-            lastError = _formatGeminiHttpErrorJS(res.status, errRaw);
-            if (res.status === 404) saw404 = true;
-            if (i + 1 < attempts.length && (res.status === 400 || res.status === 404)) continue;
-            break;
-          }
+      const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timer = ctrl ? setTimeout(() => { try { ctrl.abort(); } catch (_) {} }, 18000) : null;
+      try {
+        const fetchOpts = { method: 'POST', headers: stdHeaders, body: payloadBody };
+        if (ctrl) fetchOpts.signal = ctrl.signal;
+        const res = await _nativeFetch(glaUrl, fetchOpts);
+        if (res.ok) {
           const json = await res.json();
           const parts = json?.candidates?.[0]?.content?.parts || [];
           const txt = parts.map((p) => String(p?.text || '')).join('');
           const parsed = _extractJsonBlockJS(txt);
           if (parsed !== null) {
-            return { data: parsed, error: '', model: mName, endpoint: att.label };
+            return { data: parsed, error: '', model: mName, endpoint: 'Google AI Studio', http_status: 200 };
           }
-          lastError = 'AI trả về dữ liệu không đúng định dạng JSON';
-          break;
-        } catch (err) {
-          if (err && err.name === 'AbortError') {
-            return { data: null, error: 'Hết thời gian chờ máy chủ AI (Timeout 18s)', model: mName, endpoint: att.label };
-          }
-          lastError = `Lỗi kết nối mạng tới máy chủ AI (${err?.message || 'Network error'})`;
-          if (i + 1 < attempts.length) continue;
-          return { data: null, error: lastError, model: mName, endpoint: att.label };
-        } finally {
-          if (timer !== null) clearTimeout(timer);
+          return { data: null, error: 'HTTP 200: AI trả về dữ liệu không đúng định dạng JSON', model: mName, endpoint: 'Google AI Studio', http_status: 200 };
         }
-      }
 
-      if (!saw404) {
-        return { data: null, error: lastError || 'Không thể kết nối AI', model: mName, endpoint: lastEp };
+        const errRaw = await res.text().catch(() => '');
+        lastError = _formatGeminiHttpErrorJS(res.status, errRaw);
+        lastStatus = res.status;
+        if (res.status === 404 || res.status === 503) continue;
+
+        if ((res.status === 400 || res.status === 401 || res.status === 403) && key.startsWith('AQ.')) {
+          const vUrl = `https://aiplatform.googleapis.com/v1/publishers/google/models/${encModel}:generateContent`;
+          const vCtrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+          const vTimer = vCtrl ? setTimeout(() => { try { vCtrl.abort(); } catch (_) {} }, 15000) : null;
+          try {
+            const vOpts = { method: 'POST', headers: stdHeaders, body: payloadBody };
+            if (vCtrl) vOpts.signal = vCtrl.signal;
+            const vRes = await _nativeFetch(vUrl, vOpts);
+            if (vRes.ok) {
+              const vJson = await vRes.json();
+              const vParts = vJson?.candidates?.[0]?.content?.parts || [];
+              const vTxt = vParts.map((p) => String(p?.text || '')).join('');
+              const vParsed = _extractJsonBlockJS(vTxt);
+              if (vParsed !== null) {
+                return { data: vParsed, error: '', model: mName, endpoint: 'Vertex AI Express', http_status: 200 };
+              }
+              return { data: null, error: 'HTTP 200: Vertex AI trả về dữ liệu không đúng định dạng JSON', model: mName, endpoint: 'Vertex AI Express', http_status: 200 };
+            }
+            const vErrRaw = await vRes.text().catch(() => '');
+            const lowV = vErrRaw.toLowerCase();
+            if (!lowV.includes('has not been used in project') && !lowV.includes('is disabled')) {
+              lastError = _formatGeminiHttpErrorJS(vRes.status, vErrRaw);
+              lastStatus = vRes.status;
+              lastEp = 'Vertex AI Express';
+            }
+          } catch (_) { /* ignore Vertex fallback failure */ } finally {
+            if (vTimer !== null) clearTimeout(vTimer);
+          }
+          return { data: null, error: lastError, model: mName, endpoint: lastEp, http_status: lastStatus };
+        }
+
+        return { data: null, error: lastError, model: mName, endpoint: lastEp, http_status: lastStatus };
+      } catch (err) {
+        if (err && err.name === 'AbortError') {
+          lastError = `HTTP 504: Timeout (18s) khi gọi model ${mName}`;
+          lastStatus = 504;
+          const liteIdx = modelsToTry.indexOf('gemini-3.5-flash-lite');
+          if (!timeoutRetried && liteIdx >= idx) {
+            timeoutRetried = true;
+            idx = liteIdx;
+            continue;
+          }
+          return { data: null, error: lastError, model: mName, endpoint: lastEp, http_status: 504 };
+        }
+        return { data: null, error: `Lỗi kết nối mạng tới máy chủ AI (${err?.message || 'Network error'})`, model: mName, endpoint: lastEp, http_status: 0 };
+      } finally {
+        if (timer !== null) clearTimeout(timer);
       }
     }
 
-    return { data: null, error: lastError || 'Không thể kết nối AI', model: modelsToTry[modelsToTry.length - 1], endpoint: lastEp };
+    return { data: null, error: lastError || 'Không thể kết nối AI', model: modelsToTry[modelsToTry.length - 1], endpoint: lastEp, http_status: lastStatus };
   }
 
   async function _callGeminiJsonDirect(promptText, overrideKey = '', errBox = null, overrideModel = '') {
@@ -787,6 +808,7 @@
       errBox.error = out.error || '';
       errBox.model = out.model || '';
       errBox.endpoint = out.endpoint || '';
+      errBox.http_status = out.http_status || 0;
     }
     return out.data;
   }
@@ -2432,7 +2454,7 @@
       if (m === 'GET') {
         const cfg = getAiConfig();
         const k = cfg.gemini_api_key || '';
-        return _jsonResponse({ has_key: Boolean(k), masked_key: k ? `${k.slice(0, 6)}...${k.slice(-4)}` : '', model: cfg.gemini_model || 'gemini-2.5-flash' });
+        return _jsonResponse({ has_key: Boolean(k), masked_key: k ? `${k.slice(0, 6)}...${k.slice(-4)}` : '', model: cfg.gemini_model || 'gemini-3.5-flash-lite' });
       }
       const saved = saveAiConfig(body.gemini_api_key, body.gemini_model);
       const k = saved.gemini_api_key || '';
@@ -2442,14 +2464,15 @@
       const cfg = getAiConfig();
       const rawKey = String(body.gemini_api_key || '').trim();
       const testKey = (rawKey && rawKey !== '__KEEP__') ? rawKey : (cfg.gemini_api_key || '');
-      const testModel = String(body.gemini_model || cfg.gemini_model || 'gemini-2.5-flash').trim() || 'gemini-2.5-flash';
+      const testModel = String(body.gemini_model || cfg.gemini_model || 'gemini-3.5-flash-lite').trim() || 'gemini-3.5-flash-lite';
       if (!testKey) {
-        return _jsonResponse({ ok: false, model: testModel, endpoint: '', error: 'Chưa nhập hoặc chưa lưu Gemini API Key.' });
+        return _jsonResponse({ ok: false, http_status: 0, model: testModel, endpoint: '', error: 'Chưa nhập hoặc chưa lưu Gemini API Key.' });
       }
       const out = await _callGeminiJsonDetailedDirect('Reply with ONLY valid JSON: {"ok": true, "pong": "ready"}', testKey, testModel);
       if (out.data !== null) {
         return _jsonResponse({
           ok: true,
+          http_status: 200,
           model: out.model,
           endpoint: out.endpoint,
           message: `✓ Kết nối thành công (Model: ${out.model})`,
@@ -2457,9 +2480,10 @@
       }
       return _jsonResponse({
         ok: false,
+        http_status: out.http_status || 0,
         model: out.model || testModel,
         endpoint: out.endpoint || '',
-        error: out.error || 'Không thể kết nối tới máy chủ AI',
+        error: out.error || (out.http_status ? `HTTP ${out.http_status}: Không thể kết nối máy chủ AI` : 'Không thể kết nối tới máy chủ AI'),
       });
     }
     if (p === '/api/english/cards' && m === 'POST') {
