@@ -633,54 +633,162 @@
   }
 
   // -------------------------------------------------------------------------
-  // AI Config & Gemini Client (Direct Browser Offline Fallback)
+  // AI Config & Gemini/Vertex Client (Direct Browser Offline Fallback)
   // -------------------------------------------------------------------------
   function getAiConfig() {
     try {
       const raw = localStorage.getItem(AI_CFG_KEY);
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          return {
+            gemini_api_key: String(parsed.gemini_api_key || ''),
+            gemini_model: String(parsed.gemini_model || 'gemini-2.5-flash') || 'gemini-2.5-flash',
+          };
+        }
+      }
     } catch (_) { /* ignore */ }
-    return { gemini_api_key: '', gemini_model: 'gemini-2.0-flash' };
+    return { gemini_api_key: '', gemini_model: 'gemini-2.5-flash' };
   }
 
   function saveAiConfig(key, model) {
     const prev = getAiConfig();
     const nextKey = key === '__KEEP__' ? (prev.gemini_api_key || '') : String(key || '').trim();
-    const nextModel = String(model || prev.gemini_model || 'gemini-2.0-flash').trim() || 'gemini-2.0-flash';
+    const nextModel = String(model || prev.gemini_model || 'gemini-2.5-flash').trim() || 'gemini-2.5-flash';
     try { localStorage.setItem(AI_CFG_KEY, JSON.stringify({ gemini_api_key: nextKey, gemini_model: nextModel })); } catch (_) {}
     return { gemini_api_key: nextKey, gemini_model: nextModel };
   }
 
-  async function _callGeminiJsonDirect(promptText, overrideKey = '') {
-    const cfg = getAiConfig();
-    const key = String(overrideKey || cfg.gemini_api_key || '').trim();
-    if (!key) return null;
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) return null;
-    const model = cfg.gemini_model || 'gemini-2.0-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
-    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timer = ctrl ? setTimeout(() => { try { ctrl.abort(); } catch (_) {} }, 18000) : null;
+  function _formatGeminiHttpErrorJS(status, rawText) {
+    let detail = '';
     try {
-      const fetchOpts = {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: promptText }] }],
-          generationConfig: { temperature: 0.35, responseMimeType: 'application/json' },
-        }),
-      };
-      if (ctrl) fetchOpts.signal = ctrl.signal;
-      const res = await _nativeFetch(url, fetchOpts);
-      if (!res.ok) return null;
-      const data = await res.json();
-      const txt = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      const m = txt.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-      return m ? JSON.parse(m[1]) : JSON.parse(txt);
+      const obj = JSON.parse(rawText || '{}');
+      detail = String(obj?.error?.message || obj?.error?.status || obj?.message || '').trim();
     } catch (_) {
-      return null;
-    } finally {
-      if (timer !== null) clearTimeout(timer);
+      detail = '';
     }
+    if (!detail) detail = String(rawText || '').replace(/\s+/g, ' ').trim();
+    detail = detail.slice(0, 180);
+    if (status === 429) return detail ? `HTTP 429: Quá giới hạn miễn phí (${detail})` : 'HTTP 429: Quá giới hạn miễn phí';
+    if (status === 404) return detail ? `HTTP 404: Model not found (${detail})` : 'HTTP 404: Model not found';
+    return detail ? `HTTP ${status}: ${detail}` : `HTTP ${status}`;
+  }
+
+  function _extractJsonBlockJS(rawText) {
+    let txt = String(rawText || '').trim();
+    if (!txt) return null;
+    const fenced = txt.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenced) txt = fenced[1].trim();
+    try {
+      return JSON.parse(txt);
+    } catch (_) {
+      const m = txt.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+      if (m) {
+        try { return JSON.parse(m[1]); } catch (_2) { return null; }
+      }
+    }
+    return null;
+  }
+
+  async function _callGeminiJsonDetailedDirect(promptText, overrideKey = '', overrideModel = '') {
+    const cfg = getAiConfig();
+    const rawOv = String(overrideKey || '').trim();
+    const key = (rawOv && rawOv !== '__KEEP__') ? rawOv : String(cfg.gemini_api_key || '').trim();
+    const reqModel = String(overrideModel || cfg.gemini_model || 'gemini-2.5-flash').trim() || 'gemini-2.5-flash';
+    if (!key) return { data: null, error: 'Chưa cấu hình Gemini API Key', model: reqModel, endpoint: '' };
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return { data: null, error: 'Thiết bị đang ngoại tuyến (Mất kết nối mạng)', model: reqModel, endpoint: '' };
+    }
+
+    const payloadBody = JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: promptText }] }],
+      generationConfig: { temperature: 0.35, responseMimeType: 'application/json' },
+    });
+
+    const modelsToTry = [reqModel];
+    if (reqModel !== 'gemini-2.5-flash') modelsToTry.push('gemini-2.5-flash');
+
+    let lastError = '';
+    let lastEp = '';
+
+    for (const mName of modelsToTry) {
+      let saw404 = false;
+      const encModel = encodeURIComponent(mName);
+      const encKey = encodeURIComponent(key);
+      const attempts = key.startsWith('AQ.')
+        ? [
+            {
+              label: 'Vertex AI Express',
+              url: `https://aiplatform.googleapis.com/v1/publishers/google/models/${encModel}:generateContent?key=${encKey}`,
+              headers: { 'Content-Type': 'application/json' },
+            },
+            {
+              label: 'Google AI Studio (Header)',
+              url: `https://generativelanguage.googleapis.com/v1beta/models/${encModel}:generateContent`,
+              headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+            },
+          ]
+        : [
+            {
+              label: 'Google AI Studio',
+              url: `https://generativelanguage.googleapis.com/v1beta/models/${encModel}:generateContent?key=${encKey}`,
+              headers: { 'Content-Type': 'application/json' },
+            },
+          ];
+
+      for (let i = 0; i < attempts.length; i += 1) {
+        const att = attempts[i];
+        lastEp = att.label;
+        const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timer = ctrl ? setTimeout(() => { try { ctrl.abort(); } catch (_) {} }, 18000) : null;
+        try {
+          const fetchOpts = { method: 'POST', headers: att.headers, body: payloadBody };
+          if (ctrl) fetchOpts.signal = ctrl.signal;
+          const res = await _nativeFetch(att.url, fetchOpts);
+          if (!res.ok) {
+            const errRaw = await res.text().catch(() => '');
+            lastError = _formatGeminiHttpErrorJS(res.status, errRaw);
+            if (res.status === 404) saw404 = true;
+            if (i + 1 < attempts.length && (res.status === 400 || res.status === 404)) continue;
+            break;
+          }
+          const json = await res.json();
+          const parts = json?.candidates?.[0]?.content?.parts || [];
+          const txt = parts.map((p) => String(p?.text || '')).join('');
+          const parsed = _extractJsonBlockJS(txt);
+          if (parsed !== null) {
+            return { data: parsed, error: '', model: mName, endpoint: att.label };
+          }
+          lastError = 'AI trả về dữ liệu không đúng định dạng JSON';
+          break;
+        } catch (err) {
+          if (err && err.name === 'AbortError') {
+            return { data: null, error: 'Hết thời gian chờ máy chủ AI (Timeout 18s)', model: mName, endpoint: att.label };
+          }
+          lastError = `Lỗi kết nối mạng tới máy chủ AI (${err?.message || 'Network error'})`;
+          if (i + 1 < attempts.length) continue;
+          return { data: null, error: lastError, model: mName, endpoint: att.label };
+        } finally {
+          if (timer !== null) clearTimeout(timer);
+        }
+      }
+
+      if (!saw404) {
+        return { data: null, error: lastError || 'Không thể kết nối AI', model: mName, endpoint: lastEp };
+      }
+    }
+
+    return { data: null, error: lastError || 'Không thể kết nối AI', model: modelsToTry[modelsToTry.length - 1], endpoint: lastEp };
+  }
+
+  async function _callGeminiJsonDirect(promptText, overrideKey = '', errBox = null, overrideModel = '') {
+    const out = await _callGeminiJsonDetailedDirect(promptText, overrideKey, overrideModel);
+    if (errBox && typeof errBox === 'object') {
+      errBox.error = out.error || '';
+      errBox.model = out.model || '';
+      errBox.endpoint = out.endpoint || '';
+    }
+    return out.data;
   }
 
   // -------------------------------------------------------------------------
@@ -2180,10 +2288,12 @@
       const offlineRes = evaluateFlashcardOfflineJS(body.reference_answer || '', body.user_answer || '');
       const mode = String(body.mode || 'auto').trim().toLowerCase();
       if (mode !== 'offline' && String(body.user_answer || '').trim()) {
-        const aiOut = await _callGeminiJsonDirect(_buildFlashcardGeminiPromptJS(body), body.api_key || '');
+        const errBox = {};
+        const aiOut = await _callGeminiJsonDirect(_buildFlashcardGeminiPromptJS(body), body.api_key || '', errBox);
         if (aiOut && typeof aiOut === 'object' && ('overall_score' in aiOut || 'note_match_score' in aiOut || 'verdict' in aiOut)) {
-          return _jsonResponse(_normalizeGeminiFlashcardEval(aiOut, offlineRes));
+          return _jsonResponse({ ..._normalizeGeminiFlashcardEval(aiOut, offlineRes), used_model: errBox.model || '' });
         }
+        return _jsonResponse({ ...offlineRes, ai_error: errBox.error || 'AI trả về dữ liệu chấm điểm không hợp lệ' });
       }
       return _jsonResponse(offlineRes);
     }
@@ -2194,16 +2304,18 @@
         body.question || '',
         body.reference_answer || ''
       );
-      const aiOut = await _callGeminiJsonDirect(_buildFlashcardFollowUpGeminiPromptJS(body), body.api_key || '');
+      const errBox = {};
+      const aiOut = await _callGeminiJsonDirect(_buildFlashcardFollowUpGeminiPromptJS(body), body.api_key || '', errBox);
       if (aiOut && typeof aiOut === 'object' && String(aiOut.followup_question || '').trim()) {
         return _jsonResponse({
           engine: 'gemini',
+          used_model: errBox.model || '',
           focus_tag: String(aiOut.focus_tag || offlineRes.focus_tag).trim(),
           followup_question: String(aiOut.followup_question).trim(),
           model_answer: String(aiOut.model_answer || offlineRes.model_answer).trim(),
         });
       }
-      return _jsonResponse(offlineRes);
+      return _jsonResponse({ ...offlineRes, ai_error: errBox.error || '' });
     }
     match = p.match(/^\/api\/workspace-categories\/([^/]+)\/reset$/);
     if (match && m === 'POST') {
@@ -2320,11 +2432,35 @@
       if (m === 'GET') {
         const cfg = getAiConfig();
         const k = cfg.gemini_api_key || '';
-        return _jsonResponse({ has_key: Boolean(k), masked_key: k ? `${k.slice(0, 6)}...${k.slice(-4)}` : '', model: cfg.gemini_model || 'gemini-2.0-flash' });
+        return _jsonResponse({ has_key: Boolean(k), masked_key: k ? `${k.slice(0, 6)}...${k.slice(-4)}` : '', model: cfg.gemini_model || 'gemini-2.5-flash' });
       }
       const saved = saveAiConfig(body.gemini_api_key, body.gemini_model);
       const k = saved.gemini_api_key || '';
       return _jsonResponse({ saved: true, has_key: Boolean(k), masked_key: k ? `${k.slice(0, 6)}...${k.slice(-4)}` : '', model: saved.gemini_model });
+    }
+    if (p === '/api/english/ai-config/test' && m === 'POST') {
+      const cfg = getAiConfig();
+      const rawKey = String(body.gemini_api_key || '').trim();
+      const testKey = (rawKey && rawKey !== '__KEEP__') ? rawKey : (cfg.gemini_api_key || '');
+      const testModel = String(body.gemini_model || cfg.gemini_model || 'gemini-2.5-flash').trim() || 'gemini-2.5-flash';
+      if (!testKey) {
+        return _jsonResponse({ ok: false, model: testModel, endpoint: '', error: 'Chưa nhập hoặc chưa lưu Gemini API Key.' });
+      }
+      const out = await _callGeminiJsonDetailedDirect('Reply with ONLY valid JSON: {"ok": true, "pong": "ready"}', testKey, testModel);
+      if (out.data !== null) {
+        return _jsonResponse({
+          ok: true,
+          model: out.model,
+          endpoint: out.endpoint,
+          message: `✓ Kết nối thành công (Model: ${out.model})`,
+        });
+      }
+      return _jsonResponse({
+        ok: false,
+        model: out.model || testModel,
+        endpoint: out.endpoint || '',
+        error: out.error || 'Không thể kết nối tới máy chủ AI',
+      });
     }
     if (p === '/api/english/cards' && m === 'POST') {
       const id = (body.id || '').trim() || _nextSeqId(snap.english_cards, 'ENG');
@@ -2459,8 +2595,11 @@
         if (userLow.includes(String(kw).toLowerCase())) matched.push(kw);
         else missing.push(kw);
       });
+      const errBox = {};
       const aiRes = await _callGeminiJsonDirect(
-        `Evaluate this English engineering sentence.\nPrompt: ${body.prompt_vi}\nReference: ${body.reference_en}\nUser: ${body.user_en}\nKeywords: ${kws.join(', ')}\nReturn JSON keys: score(0-100), verdict(Vietnamese), corrected_user_en, grammar_notes(array Vietnamese), natural_en_report, natural_en_interview.`
+        `Evaluate this English engineering sentence.\nPrompt: ${body.prompt_vi}\nReference: ${body.reference_en}\nUser: ${body.user_en}\nKeywords: ${kws.join(', ')}\nReturn JSON keys: score(0-100), verdict(Vietnamese), corrected_user_en, grammar_notes(array Vietnamese), natural_en_report, natural_en_interview.`,
+        body.api_key || '',
+        errBox
       );
       const score = aiRes?.score ?? Math.min(100, Math.max(40, Math.round((matched.length / Math.max(1, kws.length)) * 55 + 42)));
       const drill = (snap.english_combat_drills || []).find((d) => d.id === body.drill_id);
@@ -2484,6 +2623,7 @@
       await saveLocalSnapshot(snap);
       return _jsonResponse({
         engine: aiRes ? 'gemini' : 'offline',
+        ai_error: (!aiRes && (body.api_key || getAiConfig().gemini_api_key)) ? (errBox.error || '') : '',
         mode: body.mode || 'speaking',
         score,
         verdict: aiRes?.verdict || (missing.length ? `Khớp ${matched.length}/${kws.length} từ khóa bắt buộc (Offline Mobile).` : 'Xuất sắc! Bạn đã dùng đủ toàn bộ từ khóa mục tiêu (Offline Mobile).'),
@@ -2504,8 +2644,11 @@
       const cards = snap.english_cards || [];
       const picked = [...cards.filter((c) => c.is_due), ...cards.filter((c) => !c.is_due)].slice(0, count);
       const termsTxt = picked.map((c) => `${c.term} (${c.meaning_vi})`).join('; ');
+      const errBox = {};
       const aiReading = picked.length ? await _callGeminiJsonDirect(
-        `Write an authentic 3-paragraph English industrial electronics / PLC field engineering report incorporating these ${picked.length} terms verbatim: ${termsTxt}.\nAlso create 3 Vietnamese/English comprehension MCQ questions testing these terms.\nReturn JSON ONLY: {"title_en": "...", "title_vi": "...", "paragraphs": [{"en": "...", "vi": "..."}], "questions": [{"question": "...", "options": ["A","B","C","D"], "correct_index": 0, "explanation_vi": "..."}]}`
+        `Write an authentic 3-paragraph English industrial electronics / PLC field engineering report incorporating these ${picked.length} terms verbatim: ${termsTxt}.\nAlso create 3 Vietnamese/English comprehension MCQ questions testing these terms.\nReturn JSON ONLY: {"title_en": "...", "title_vi": "...", "paragraphs": [{"en": "...", "vi": "..."}], "questions": [{"question": "...", "options": ["A","B","C","D"], "correct_index": 0, "explanation_vi": "..."}]}`,
+        body.api_key || '',
+        errBox
       ) : null;
       if (aiReading && Array.isArray(aiReading.paragraphs) && aiReading.paragraphs.length) {
         return _jsonResponse({
@@ -2522,6 +2665,7 @@
       const p3 = picked.slice(6).map((c) => c.example_en || `Document ${c.term} in the maintenance log.`).join(' ') || `Remember to log ${picked[0]?.term || 'key findings'} cleanly after verification.`;
       return _jsonResponse({
         engine: 'offline',
+        ai_error: (picked.length && (body.api_key || getAiConfig().gemini_api_key)) ? (errBox.error || '') : '',
         title_en: `Offline Field Bulletin: ${picked[0]?.term || 'Diagnostics'} (${picked.length} Terms)`,
         title_vi: `Bản tin Kỹ thuật Offline: ${picked[0]?.term || 'Chẩn đoán'} (${picked.length} từ mục tiêu)`,
         target_cards: picked,
@@ -2546,12 +2690,16 @@
     if (p === '/api/english/magic-fill' && m === 'POST') {
       const term = String(body.term || '').trim();
       const low = term.toLowerCase();
+      const errBox = {};
       const ai = await _callGeminiJsonDirect(
-        `Fill technical English SRS flashcard for electronics/automation term "${term}". Return JSON: term, ipa, word_class, category, meaning_vi, collocations, example_en, example_vi.`
+        `Fill technical English SRS flashcard for electronics/automation term "${term}". Return JSON: term, ipa, word_class, category, meaning_vi, collocations, example_en, example_vi.`,
+        body.api_key || '',
+        errBox
       );
       if (ai && ai.meaning_vi) return _jsonResponse({ engine: 'gemini', ...ai });
+      const aiErr = (body.api_key || getAiConfig().gemini_api_key) ? (errBox.error || '') : '';
       const cardHit = (snap.english_cards || []).find((c) => String(c.term || '').trim().toLowerCase() === low);
-      if (cardHit) return _jsonResponse({ engine: 'database', ...cardHit });
+      if (cardHit) return _jsonResponse({ engine: 'database', ai_error: aiErr, ...cardHit });
       const glossHit = (snap.en_glossary || []).find((g) => {
         const ge = String(g.en || '').trim().toLowerCase();
         return ge === low || ge.includes(low) || low.includes(ge);
@@ -2559,6 +2707,7 @@
       if (glossHit) {
         return _jsonResponse({
           engine: 'offline',
+          ai_error: aiErr,
           term,
           ipa: '/.../',
           word_class: term.split(/\s+/).length >= 4 ? 'Lexical Chunk' : 'Noun',
@@ -2571,6 +2720,7 @@
       }
       return _jsonResponse({
         engine: 'offline',
+        ai_error: aiErr,
         term,
         ipa: '/.../',
         word_class: term.includes(',') || term.split(' ').length >= 4 ? 'Lexical Chunk' : 'Noun',
@@ -2700,8 +2850,11 @@
       const cards = snap.english_cards || [];
       const existingLow = new Set(cards.map((c) => String(c.term || '').toLowerCase()));
 
+      const errBox = {};
       const aiExt = await _callGeminiJsonDirect(
-        `Extract 6 to 10 important technical English terms or lexical chunks from this industrial engineering manual excerpt and translate to Vietnamese.\nText:\n${txt.slice(0, 3000)}\nReturn JSON ONLY: {"summary_vi": "...", "terms": [{"term": "...", "ipa": "...", "word_class": "...", "category": "...", "meaning_vi": "...", "collocations": "...", "example_en": "...", "example_vi": "..."}]}`
+        `Extract 6 to 10 important technical English terms or lexical chunks from this industrial engineering manual excerpt and translate to Vietnamese.\nText:\n${txt.slice(0, 3000)}\nReturn JSON ONLY: {"summary_vi": "...", "terms": [{"term": "...", "ipa": "...", "word_class": "...", "category": "...", "meaning_vi": "...", "collocations": "...", "example_en": "...", "example_vi": "..."}]}`,
+        body.api_key || '',
+        errBox
       );
       if (aiExt && Array.isArray(aiExt.terms) && aiExt.terms.length) {
         const aiTerms = aiExt.terms.slice(0, 10).map((it) => ({
@@ -2768,6 +2921,7 @@
 
       return _jsonResponse({
         engine: 'offline',
+        ai_error: (body.api_key || getAiConfig().gemini_api_key) ? (errBox.error || '') : '',
         summary_vi: `Đã bóc tách ${terms.length} thuật ngữ từ Manual (Offline Mobile).`,
         terms: terms.slice(0, 10),
       });
@@ -2838,10 +2992,15 @@
       let pool = (snap.english_cards || []).filter((c) => catFilter === 'ALL' || c.category === catFilter);
       if (!pool.length) pool = (snap.english_cards || []);
 
-      if (manualText && getAiConfig().gemini_api_key) {
+      let quizErr = '';
+      if (manualText && (body.api_key || getAiConfig().gemini_api_key)) {
+        const errBox = {};
         const aiQuiz = await _callGeminiJsonDirect(
-          `Create ${count} Technical English OpenQuiz questions (mix of mcq and cloze) from this industrial manual:\n${manualText.slice(0, 2800)}\nReturn JSON ONLY: JSON array of objects with keys quiz_type("mcq"|"cloze"), category, question_text, blank_answer, options(array of 4 strings), correct_index(0-3), explanation_vi, context_quote.`
+          `Create ${count} Technical English OpenQuiz questions (mix of mcq and cloze) from this industrial manual:\n${manualText.slice(0, 2800)}\nReturn JSON ONLY: JSON array of objects with keys quiz_type("mcq"|"cloze"), category, question_text, blank_answer, options(array of 4 strings), correct_index(0-3), explanation_vi, context_quote.`,
+          body.api_key || '',
+          errBox
         );
+        quizErr = errBox.error || '';
         if (Array.isArray(aiQuiz) && aiQuiz.length) {
           const formatted = aiQuiz.slice(0, count).map((q, idx) => ({
             id: `MOB-QZ-${Date.now()}-${idx}`,
@@ -2916,6 +3075,7 @@
       });
       return _jsonResponse({
         engine: 'offline',
+        ai_error: quizErr,
         generated_count: quizzes.length,
         items: quizzes,
         generated: quizzes,

@@ -376,6 +376,9 @@ async function generateOpenQuizNow() {
         : `Đã tạo ${state.openQuiz.sessionCustomDeck.length} câu hỏi chuẩn OpenQuizAI (${data.engine === 'gemini' ? 'Gemini AI' : 'Offline Engine'})`,
       'success'
     );
+    if (data.engine !== 'gemini' && data.ai_error && state.hasGeminiKey) {
+      showToast(`AI OpenQuiz fallback Offline: ${data.ai_error}`, 'error');
+    }
   } catch (err) {
     showToast(err.message, 'error');
   } finally {
@@ -973,6 +976,9 @@ async function submitEnCoachEvaluation() {
     state.enCoach.result = data;
     _applyEnglishCardsResponse(data);
     renderEnCoachView();
+    if (data.engine !== 'gemini' && data.ai_error && state.hasGeminiKey) {
+      showToast(`AI Combat fallback Offline: ${data.ai_error}`, 'error');
+    }
   } catch (err) {
     state.enCoach.loading = false;
     renderEnCoachView();
@@ -1230,6 +1236,9 @@ async function generateContextualReading() {
     state.enReading.data = await res.json();
     state.enReading.loading = false;
     renderEnReadingView();
+    if (state.enReading.data?.engine !== 'gemini' && state.enReading.data?.ai_error && state.hasGeminiKey) {
+      showToast(`AI Reading fallback Offline: ${state.enReading.data.ai_error}`, 'error');
+    }
   } catch (err) {
     state.enReading.loading = false;
     renderEnReadingView();
@@ -1750,6 +1759,9 @@ async function magicFillVocabModal() {
     document.getElementById('ev-form-ex-en').value = d.example_en || '';
     document.getElementById('ev-form-ex-vi').value = d.example_vi || '';
     showToast(`✨ Magic Fill đã điền đầy đủ thông số cho "${d.term || term}"!`, 'success');
+    if (d.engine !== 'gemini' && d.ai_error && state.hasGeminiKey) {
+      showToast(`AI Magic Fill fallback Offline: ${d.ai_error}`, 'error');
+    }
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -1821,6 +1833,9 @@ async function runIngestMagicFill() {
     state.enIngest.magicResult = await res.json();
     state.enIngest.loading = false;
     renderEnIngestView();
+    if (state.enIngest.magicResult?.engine !== 'gemini' && state.enIngest.magicResult?.ai_error && state.hasGeminiKey) {
+      showToast(`AI Magic Fill fallback Offline: ${state.enIngest.magicResult.ai_error}`, 'error');
+    }
   } catch (err) {
     state.enIngest.loading = false;
     renderEnIngestView();
@@ -1936,6 +1951,9 @@ async function runExtractManualText() {
     });
     state.enIngest.loading = false;
     renderEnIngestView();
+    if (data.engine !== 'gemini' && data.ai_error && state.hasGeminiKey) {
+      showToast(`AI Extract Manual fallback Offline: ${data.ai_error}`, 'error');
+    }
   } catch (err) {
     state.enIngest.loading = false;
     renderEnIngestView();
@@ -2126,20 +2144,27 @@ async function openAiConfigModal() {
   const statusEl = document.getElementById('ai-cfg-status-banner');
   const keyInp = document.getElementById('ai-cfg-key-input');
   const modelSel = document.getElementById('ai-cfg-model-select');
+  const testResEl = document.getElementById('ai-cfg-test-result');
   if (keyInp) keyInp.value = '';
+  if (testResEl) {
+    testResEl.textContent = '';
+    testResEl.classList.add('hidden');
+    testResEl.style.color = '';
+    testResEl.style.borderColor = 'var(--line)';
+  }
   const isEn = state.appLang === 'en';
   try {
     const res = await fetch('/api/english/ai-config');
     if (res.ok) {
       const cfg = await res.json();
       state.hasGeminiKey = Boolean(cfg.has_key);
-      state.geminiModel = cfg.model || 'gemini-2.0-flash';
+      state.geminiModel = cfg.model || 'gemini-2.5-flash';
       if (modelSel) modelSel.value = state.geminiModel;
       if (statusEl) {
         statusEl.innerHTML = cfg.has_key
           ? (isEn
-            ? `<span style="color:var(--green);">● GEMINI API KEY CONNECTED: <b>${escapeHtml(cfg.masked_key)}</b> · Model: ${escapeHtml(cfg.model)}</span>`
-            : `<span style="color:var(--green);">● ĐÃ KẾT NỐI GEMINI API KEY: <b>${escapeHtml(cfg.masked_key)}</b> · Model: ${escapeHtml(cfg.model)}</span>`)
+            ? `<span style="color:var(--green);">● GEMINI / VERTEX KEY CONNECTED: <b>${escapeHtml(cfg.masked_key)}</b> · Model: ${escapeHtml(cfg.model)}</span>`
+            : `<span style="color:var(--green);">● ĐÃ KẾT NỐI GEMINI / VERTEX KEY: <b>${escapeHtml(cfg.masked_key)}</b> · Model: ${escapeHtml(cfg.model)}</span>`)
           : (isEn
             ? `<span style="color:var(--amber);">● NO API KEY SET — Running 100% Free Offline Rule-based Engine</span>`
             : `<span style="color:var(--amber);">● CHƯA CÀI API KEY — Đang sử dụng bộ Offline Engine thông minh (Miễn phí 100%)</span>`);
@@ -2155,11 +2180,80 @@ function closeAiConfigModal() {
   document.getElementById('en-ai-config-modal')?.classList.add('hidden');
 }
 
+async function testAiConfigConnection() {
+  const isEn = state.appLang === 'en';
+  const key = (document.getElementById('ai-cfg-key-input')?.value || '').trim();
+  const model = document.getElementById('ai-cfg-model-select')?.value || 'gemini-2.5-flash';
+  const btn = document.getElementById('ai-cfg-test-btn');
+  const box = document.getElementById('ai-cfg-test-result');
+  const effectiveKey = key || (state.hasGeminiKey ? '__KEEP__' : '');
+  if (!effectiveKey) {
+    if (box) {
+      box.classList.remove('hidden');
+      box.style.color = 'var(--amber)';
+      box.style.borderColor = 'var(--amber)';
+      box.textContent = isEn ? 'Please enter an API Key (AIzaSy... or AQ....) first.' : 'Vui lòng dán API Key (AIzaSy... hoặc AQ....) trước khi test.';
+    }
+    showToast(isEn ? 'Enter API Key first' : 'Chưa có API Key để kiểm tra', 'info');
+    return;
+  }
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = isEn ? '⏳ Testing...' : '⏳ Đang test...';
+  }
+  if (box) {
+    box.classList.remove('hidden');
+    box.style.color = 'var(--amber)';
+    box.style.borderColor = 'var(--line)';
+    box.textContent = isEn ? `Sending ping to ${model}...` : `Đang gửi ping kiểm tra tới ${model}...`;
+  }
+  try {
+    const res = await fetch('/api/english/ai-config/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gemini_api_key: effectiveKey, gemini_model: model }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data.ok) {
+      const msg = isEn
+        ? `✓ Connected successfully (Model: ${data.model || model}${data.endpoint ? ' · ' + data.endpoint : ''})`
+        : `✓ Kết nối thành công (Model: ${data.model || model}${data.endpoint ? ' · ' + data.endpoint : ''})`;
+      if (box) {
+        box.style.color = 'var(--green)';
+        box.style.borderColor = 'var(--green)';
+        box.textContent = msg;
+      }
+      showToast(msg, 'success');
+    } else {
+      const errMsg = data.error || (isEn ? 'Connection failed' : 'Kết nối thất bại');
+      if (box) {
+        box.style.color = 'var(--red)';
+        box.style.borderColor = 'var(--red)';
+        box.textContent = `✕ ${errMsg}`;
+      }
+      showToast(`AI Test thất bại: ${errMsg}`, 'error');
+    }
+  } catch (err) {
+    const msg = err?.message || 'Lỗi mạng';
+    if (box) {
+      box.style.color = 'var(--red)';
+      box.style.borderColor = 'var(--red)';
+      box.textContent = `✕ ${msg}`;
+    }
+    showToast(msg, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '⚡ Test kết nối AI';
+    }
+  }
+}
+
 async function submitAiConfigForm(ev) {
   ev.preventDefault();
   const isEn = state.appLang === 'en';
   const key = (document.getElementById('ai-cfg-key-input')?.value || '').trim();
-  const model = document.getElementById('ai-cfg-model-select')?.value || 'gemini-2.0-flash';
+  const model = document.getElementById('ai-cfg-model-select')?.value || 'gemini-2.5-flash';
   try {
     const res = await fetch('/api/english/ai-config', {
       method: 'POST',

@@ -17,7 +17,7 @@
   <script>try{if(localStorage.getItem("mrl-theme")==="light"){document.documentElement.dataset.theme="light";var mc=document.querySelector('meta[name="theme-color"]');if(mc)mc.setAttribute("content","#FFFFFF");}if(localStorage.getItem("mrl-en-mode")!=="0")document.documentElement.classList.add("en-mode-on");if(localStorage.getItem("mrl-app-lang")==="en")document.documentElement.dataset.lang="en";}catch(e){}</script>
   <link rel="stylesheet" href="./static/styles.css?v=39" />
   <link rel="stylesheet" href="./static/mobile.css?v=18" />
-  <meta name="mrl-build" content="20261121144153" />
+  <meta name="mrl-build" content="20261121145556" />
 </head>
 <body spellcheck="false">
 <input type="file" id="excel-import-input" accept=".xlsx,.xlsm" class="hidden" />
@@ -983,29 +983,31 @@
     </div>
     <form id="en-ai-config-form" class="ov-body form" onsubmit="submitAiConfigForm(event)">
       <div class="note-block accent" style="border-left-color:#6366F1;">
-        <div class="nb-title" style="color:#818CF8;">CHẾ ĐỘ LAI THÔNG MINH (HYBRID OFFLINE + GEMINI AI)</div>
+        <div class="nb-title" style="color:#818CF8;">CHẾ ĐỘ LAI THÔNG MINH (HYBRID OFFLINE + GEMINI / VERTEX AI)</div>
         <div class="nb-body" style="font-size:12.5px;">
-          • <b>Không cần API Key / Không có mạng:</b> Phần mềm vẫn chạy đầy đủ bằng <b>Offline Rule-based Generator &amp; Grammar Coach</b> từ 83 bản ghi MRL/PLC/NET và Kho Từ vựng.<br />
-          • <b>Khi dán Gemini API Key miễn phí:</b> Lấy key tại <code>aistudio.google.com/apikey</code> (lưu local trong SQLite trên máy bạn) để OpenQuiz AI sinh đề đọc hiểu Manual &amp; chấm ngữ pháp 1-1 chuyên sâu bằng AI thật.
+          • <b>Không cần API Key / Không có mạng:</b> Phần mềm vẫn chạy đầy đủ bằng <b>Offline Rubric &amp; Rule-based Engine</b> từ toàn bộ dữ liệu MRL/PLC/NET và Kho Từ vựng.<br />
+          • <b>Hỗ trợ đầy đủ 2 loại Key:</b> <b>Google AI Studio</b> (<code>AIzaSy...</code>) và <b>Vertex AI Express Mode</b> (<code>AQ....</code>) — lưu local trên máy / trình duyệt của bạn để bật Chấm 2 tầng AI, OpenQuiz &amp; Grammar Coach thật.
         </div>
       </div>
       <div id="ai-cfg-status-banner" class="mono" style="font-size:12px; padding:6px 10px; border:1px solid var(--line); background:var(--panel); border-radius:var(--r);"></div>
       <div>
-        <label class="lbl">Gemini API Key (để trống nếu muốn xóa Key cũ hoặc dùng chế độ Offline)</label>
-        <input id="ai-cfg-key-input" class="inp mono" type="password" autocomplete="off" placeholder="AIzaSy..." />
+        <label class="lbl">Gemini / Vertex API Key (để trống nếu giữ nguyên Key cũ)</label>
+        <input id="ai-cfg-key-input" class="inp mono" type="password" autocomplete="off" placeholder="AIzaSy... hoặc AQ.... (Vertex AI Express)" />
       </div>
       <div>
         <label class="lbl">Model Gemini</label>
         <select id="ai-cfg-model-select" class="sel">
-          <option value="gemini-2.0-flash">gemini-2.0-flash (Nhanh &amp; Miễn phí — Khuyên dùng)</option>
-          <option value="gemini-2.5-flash">gemini-2.5-flash (Thông minh &amp; Chuẩn xác cao)</option>
+          <option value="gemini-2.5-flash">gemini-2.5-flash (Thông minh &amp; Chuẩn xác cao — Khuyên dùng)</option>
+          <option value="gemini-2.0-flash">gemini-2.0-flash (Nhanh &amp; Nhẹ)</option>
           <option value="gemini-1.5-flash">gemini-1.5-flash</option>
         </select>
       </div>
-      <div class="form-foot" style="justify-content:space-between;">
+      <div id="ai-cfg-test-result" class="mono hidden" style="font-size:12px; padding:7px 10px; border:1px solid var(--line); background:var(--panel); border-radius:var(--r);"></div>
+      <div class="form-foot" style="justify-content:space-between; flex-wrap:wrap; gap:8px;">
         <button type="button" class="btn btn-danger" onclick="clearGeminiApiKey()">Xóa Key (Dùng Offline)</button>
-        <div style="display:flex; gap:8px;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
           <button type="button" class="btn" onclick="closeAiConfigModal()">Đóng</button>
+          <button type="button" id="ai-cfg-test-btn" class="btn" onclick="testAiConfigConnection()">⚡ Test kết nối AI</button>
           <button type="submit" class="btn btn-indigo">Lưu cấu hình AI</button>
         </div>
       </div>
@@ -1070,17 +1072,17 @@
   </div>
 </div>
 
-<script src="./static/js/core_store.js?v=7"></script>
+<script src="./static/js/core_store.js?v=8"></script>
 <script src="./static/js/01-core.js?v=16"></script>
 <script src="./static/js/02-boot.js?v=16"></script>
 <script src="./static/js/03-views.js?v=12"></script>
 <script src="./static/js/04-media.js?v=12"></script>
 <script src="./static/js/05-split.js?v=9"></script>
 <script src="./static/js/06-reference.js?v=10"></script>
-<script src="./static/js/07-flashcards.js?v=13"></script>
+<script src="./static/js/07-flashcards.js?v=14"></script>
 <script src="./static/js/08-data.js?v=12"></script>
 <script src="./static/js/09-english.js?v=19"></script>
-<script src="./static/js/10-english-hub.js?v=12"></script>
+<script src="./static/js/10-english-hub.js?v=13"></script>
 <script src="./static/a11y.js?v=8"></script>
 <script src="./static/ui.js?v=11"></script>
 <script src="./static/js/mobile_shell.js?v=11"></script>

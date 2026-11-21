@@ -1032,7 +1032,13 @@ async function evaluateCurrentFlashcard(preferAi = true) {
       loadingAi: false,
     };
     if (preferAi && data.engine !== 'gemini') {
-      showToast('Đang dùng Offline Rubric (chưa có Gemini API Key hoặc đang mất mạng)', 'info');
+      const reason = String(data.ai_error || '').trim();
+      showToast(
+        reason
+          ? `AI fallback về Offline Rubric: ${reason}`
+          : 'Đang dùng Offline Rubric (chưa có Gemini API Key hoặc đang mất mạng)',
+        reason ? 'error' : 'info'
+      );
     }
   } catch (err) {
     const fallback = window.MRLCoreStore?.evaluateFlashcardOffline?.(card.answerText, draft) || baseEv;
@@ -1042,6 +1048,9 @@ async function evaluateCurrentFlashcard(preferAi = true) {
       loading: false,
       loadingAi: false,
     };
+    if (preferAi) {
+      showToast(`AI fallback về Offline Rubric: ${err?.message || 'Lỗi kết nối máy chủ'}`, 'error');
+    }
   }
   renderFlashcardStage();
 }
@@ -1200,6 +1209,9 @@ async function requestFlashcardFollowUp() {
       loading: false,
       showAnswer: false,
     };
+    if (data.engine !== 'gemini' && data.ai_error && state.hasGeminiKey) {
+      showToast(`AI câu hỏi xoáy fallback Offline: ${data.ai_error}`, 'error');
+    }
   } catch (err) {
     const fb = window.MRLCoreStore?.followUpFlashcardOffline?.(card.kind, card.title, card.question, card.answerText) || {};
     state.flashcard.followUps[card.cardKey] = {

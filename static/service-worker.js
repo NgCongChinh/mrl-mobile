@@ -1,5 +1,5 @@
-/* NC38 PWA Service Worker — Network-First OTA Auto-Update (20261121144153) */
-const CACHE_NAME = 'mrl-pwa-20261121144153';
+/* NC38 PWA Service Worker — Network-First OTA Auto-Update (20261121145556) */
+const CACHE_NAME = 'mrl-pwa-20261121145556';
 const CORE_SHELL = [
   './',
   './index.html',
