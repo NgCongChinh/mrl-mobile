@@ -545,6 +545,10 @@
     align-items: flex-start !important;
     gap: 10px !important;
   }
+  .d-head > div:first-child {
+    flex: 0 0 auto !important;
+    width: 100% !important;
+  }
   .d-title {
     font-size: 18px !important;
     line-height: 1.35 !important;
