@@ -2183,9 +2183,18 @@ function closeAiConfigModal() {
   document.getElementById('en-ai-config-modal')?.classList.add('hidden');
 }
 
+function _sanitizeAiKeyInput(raw) {
+  return String(raw || '').replace(/[\s\r\n]+/g, '');
+}
+
+function _isLikelyGitHubToken(key) {
+  return /^(ghp_|github_pat_|gho_|ghs_|ghu_)/i.test(String(key || '').trim());
+}
+
 async function testAiConfigConnection() {
   const isEn = state.appLang === 'en';
-  const key = (document.getElementById('ai-cfg-key-input')?.value || '').trim();
+  const rawInput = document.getElementById('ai-cfg-key-input')?.value || '';
+  const key = _sanitizeAiKeyInput(rawInput);
   const model = document.getElementById('ai-cfg-model-select')?.value || 'gemini-3.5-flash-lite';
   const btn = document.getElementById('ai-cfg-test-btn');
   const box = document.getElementById('ai-cfg-test-result');
@@ -2198,6 +2207,19 @@ async function testAiConfigConnection() {
       box.textContent = isEn ? 'Please enter an API Key (AIzaSy... or AQ....) first.' : 'Vui lòng dán API Key (AIzaSy... hoặc AQ....) trước khi test.';
     }
     showToast(isEn ? 'Enter API Key first' : 'Chưa có API Key để kiểm tra', 'info');
+    return;
+  }
+  if (key && _isLikelyGitHubToken(key)) {
+    const warnMsg = isEn
+      ? 'HTTP 400: You pasted a GitHub Token (ghp_/github_pat_...) into the Gemini API Key field. Please use a valid AIzaSy... or AQ.... key from aistudio.google.com/api-keys.'
+      : 'HTTP 400: Bạn đang dán nhầm GitHub Token (ghp_/github_pat_...) vào ô Gemini API Key. Vui lòng lấy đúng khóa AIzaSy... hoặc AQ.... tại aistudio.google.com/api-keys.';
+    if (box) {
+      box.classList.remove('hidden');
+      box.style.color = 'var(--red)';
+      box.style.borderColor = 'var(--red)';
+      box.textContent = `✕ ${warnMsg}`;
+    }
+    showToast(warnMsg, 'error');
     return;
   }
   if (btn) {
@@ -2221,9 +2243,10 @@ async function testAiConfigConnection() {
     try { data = rawTxt ? JSON.parse(rawTxt) : {}; } catch (_) { data = {}; }
 
     if (res.ok && data.ok) {
+      const epName = data.endpoint || 'Google AI';
       const msg = isEn
-        ? `✓ Connected successfully (Model: ${data.model || model}${data.endpoint ? ' · ' + data.endpoint : ''})`
-        : `✓ Kết nối thành công (Model: ${data.model || model}${data.endpoint ? ' · ' + data.endpoint : ''})`;
+        ? `✓ Connected successfully (Model: ${data.model || model} · Endpoint: ${epName})`
+        : `✓ Kết nối thành công (Model: ${data.model || model} · Endpoint: ${epName})`;
       if (box) {
         box.style.color = 'var(--green)';
         box.style.borderColor = 'var(--green)';
@@ -2234,7 +2257,7 @@ async function testAiConfigConnection() {
       let errMsg = '';
       if (!res.ok) {
         const detail = String(data.error || data.detail || rawTxt.slice(0, 220) || res.statusText || 'Lỗi máy chủ').trim();
-        errMsg = `HTTP ${res.status}: ${detail}`;
+        errMsg = /^HTTP\s+\d+:/i.test(detail) ? detail : `HTTP ${res.status}: ${detail}`;
         if (res.status === 404 && detail.toLowerCase() === 'not found') {
           errMsg += ' — Bản NC38.exe đang mở là bản cũ, hãy đóng và chạy lại bản mới.';
         }
@@ -2259,7 +2282,7 @@ async function testAiConfigConnection() {
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.textContent = '⚡ Test kết nối AI';
+      btn.textContent = isEn ? '⚡ Test AI Connection' : '⚡ Test kết nối AI';
     }
   }
 }
@@ -2267,16 +2290,32 @@ async function testAiConfigConnection() {
 async function submitAiConfigForm(ev) {
   ev.preventDefault();
   const isEn = state.appLang === 'en';
-  const key = (document.getElementById('ai-cfg-key-input')?.value || '').trim();
+  const key = _sanitizeAiKeyInput(document.getElementById('ai-cfg-key-input')?.value || '');
   const model = document.getElementById('ai-cfg-model-select')?.value || 'gemini-3.5-flash-lite';
+  const box = document.getElementById('ai-cfg-test-result');
+  if (key && _isLikelyGitHubToken(key)) {
+    const warnMsg = isEn
+      ? 'HTTP 400: You pasted a GitHub Token (ghp_/github_pat_...) into the Gemini API Key field. Please use a valid AIzaSy... or AQ.... key.'
+      : 'HTTP 400: Bạn đang dán nhầm GitHub Token (ghp_/github_pat_...) vào ô Gemini API Key. Vui lòng lấy đúng khóa AIzaSy... hoặc AQ....';
+    if (box) {
+      box.classList.remove('hidden');
+      box.style.color = 'var(--red)';
+      box.style.borderColor = 'var(--red)';
+      box.textContent = `✕ ${warnMsg}`;
+    }
+    showToast(warnMsg, 'error');
+    return;
+  }
   try {
     const res = await fetch('/api/english/ai-config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ gemini_api_key: key || (state.hasGeminiKey ? '__KEEP__' : ''), gemini_model: model }),
     });
-    if (!res.ok) throw new Error(isEn ? 'Failed to save AI configuration' : 'Lưu cấu hình AI thất bại');
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.detail || data.error || (isEn ? `HTTP ${res.status}: Failed to save AI configuration` : `HTTP ${res.status}: Lưu cấu hình AI thất bại`));
+    }
     state.hasGeminiKey = Boolean(data.has_key);
     state.geminiModel = data.model || model;
     _syncAiKeyButtons();
@@ -2285,6 +2324,12 @@ async function submitAiConfigForm(ev) {
     closeAiConfigModal();
     showToast(state.hasGeminiKey ? '🔑 Đã lưu Gemini API Key!' : 'Đã lưu cấu hình Offline Engine', 'success');
   } catch (err) {
+    if (box) {
+      box.classList.remove('hidden');
+      box.style.color = 'var(--red)';
+      box.style.borderColor = 'var(--red)';
+      box.textContent = `✕ ${err.message}`;
+    }
     showToast(err.message, 'error');
   }
 }

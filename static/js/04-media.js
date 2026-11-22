@@ -406,13 +406,18 @@ function collectCustomSections(containerId) {
 let _inlineSecSaveTimer = null;
 
 function _cloneSectionsList(list) {
-  return (list || []).map((s, idx) => ({
-    id: s.id || `sec-${idx + 1}`,
-    title: s.title || '',
-    style: s.style || 'info',
-    content: s.content || '',
-    images: Array.isArray(s.images) ? s.images.map((im) => ({ ...im })) : [],
-  }));
+  return (list || []).map((s, idx) => {
+    const obj = {
+      id: s.id || `sec-${idx + 1}`,
+      title: s.title || '',
+      style: s.style || 'info',
+      content: s.content || '',
+      images: Array.isArray(s.images) ? s.images.map((im) => ({ ...im })) : [],
+    };
+    if (s.title_en) obj.title_en = String(s.title_en);
+    if (s.content_en) obj.content_en = String(s.content_en);
+    return obj;
+  });
 }
 
 function _getEditableSectionsForRecord(kind, rec) {
@@ -494,6 +499,10 @@ function _buildMergedInlineSections(ed) {
       width: Number(im.width) || 280, height: Number(im.height) || 180, caption: im.caption || '',
     })) : [],
   };
+  const titleEn = String(ed.draft.title_en || '').trim();
+  const contentEn = String(ed.draft.content_en || '').trimEnd();
+  if (titleEn) cleanDraft.title_en = titleEn;
+  if (contentEn) cleanDraft.content_en = contentEn;
   if (ed.idx >= out.length) out.push(cleanDraft);
   else out[ed.idx] = cleanDraft;
   return out;
@@ -518,21 +527,39 @@ async function saveInlineSectionNow(showNotify = false) {
   clearTimeout(_inlineSecSaveTimer);
   const ed = state.inlineSectionEdit;
   if (!ed || ed.saving) return;
+  const isEnUi = state.appLang === 'en';
   const stEl = document.getElementById('inline-save-status');
   const box = document.getElementById('inline-sec-editor-box');
   if (box) {
-    ed.draft.title = box.querySelector('.sec-title-inp')?.value || '';
-    ed.draft.style = box.querySelector('.sec-style-sel')?.value || 'info';
-    ed.draft.content = box.querySelector('.sec-content-inp')?.value || '';
+    const tVal = box.querySelector('.sec-title-inp')?.value || '';
+    const sVal = box.querySelector('.sec-style-sel')?.value || 'info';
+    const cVal = box.querySelector('.sec-content-inp')?.value || '';
+    ed.draft.style = sVal;
+    if (ed.editLang === 'en') {
+      ed.draft.title_en = tVal;
+      ed.draft.content_en = cVal;
+      if (ed.isNew && !String(ed.draft.title || '').trim()) ed.draft.title = tVal;
+      if (ed.isNew && !String(ed.draft.content || '').trim()) ed.draft.content = cVal;
+    } else {
+      ed.draft.title = tVal;
+      ed.draft.content = cVal;
+    }
   }
   const merged = _buildMergedInlineSections(ed);
-  if (ed.isNew && !ed.draft.title.trim() && !ed.draft.content.trim() && !ed.draft.images.length) {
+  const hasAnyText = Boolean(
+    String(ed.draft.title || '').trim()
+    || String(ed.draft.content || '').trim()
+    || String(ed.draft.title_en || '').trim()
+    || String(ed.draft.content_en || '').trim()
+    || (ed.draft.images || []).length
+  );
+  if (ed.isNew && !hasAnyText) {
     ed.dirty = false;
-    if (stEl) { stEl.textContent = 'NHẬP NỘI DUNG ĐỂ LƯU'; stEl.style.color = 'var(--text-3)'; }
+    if (stEl) { stEl.textContent = isEnUi ? 'TYPE TO SAVE' : 'NHẬP NỘI DUNG ĐỂ LƯU'; stEl.style.color = 'var(--text-3)'; }
     return;
   }
   ed.saving = true;
-  if (stEl) { stEl.textContent = 'ĐANG LƯU...'; stEl.style.color = 'var(--amber)'; }
+  if (stEl) { stEl.textContent = isEnUi ? '⏳ Saving...' : '⏳ Đang lưu...'; stEl.style.color = 'var(--amber)'; }
   try {
     const saved = await _patchSectionsApi(ed.kind, ed.id, merged);
     ed.dirty = false;
@@ -540,11 +567,11 @@ async function saveInlineSectionNow(showNotify = false) {
     ed.isNew = false;
     const savedCount = (saved.custom_sections_json || []).length;
     if (ed.idx >= savedCount && savedCount > 0) ed.idx = savedCount - 1;
-    if (stEl) { stEl.textContent = 'ĐÃ LƯU TỰ ĐỘNG'; stEl.style.color = 'var(--green)'; }
+    if (stEl) { stEl.textContent = isEnUi ? '✓ Saved' : '✓ Đã lưu'; stEl.style.color = 'var(--green)'; }
     _rerenderInlineHost(ed.kind, ed.id, ed.pane, true);
-    if (showNotify) showToast('Đã lưu mục nội dung', 'success');
+    if (showNotify) showToast(isEnUi ? 'Section saved' : 'Đã lưu mục nội dung', 'success');
   } catch (err) {
-    if (stEl) { stEl.textContent = 'LỖI LƯU'; stEl.style.color = 'var(--red)'; }
+    if (stEl) { stEl.textContent = isEnUi ? 'Save error' : 'Lỗi lưu'; stEl.style.color = 'var(--red)'; }
     if (showNotify) showToast(err.message, 'error');
   } finally {
     ed.saving = false;
@@ -560,14 +587,29 @@ async function _flushInlineSectionOnLeave(rerender = false) {
     const tVal = box.querySelector('.sec-title-inp')?.value || '';
     const sVal = box.querySelector('.sec-style-sel')?.value || 'info';
     const cVal = box.querySelector('.sec-content-inp')?.value || '';
-    if (tVal !== ed.draft.title || sVal !== ed.draft.style || cVal !== ed.draft.content) {
-      ed.draft.title = tVal;
+    const curTitle = ed.editLang === 'en' ? (ed.draft.title_en || '') : (ed.draft.title || '');
+    const curContent = ed.editLang === 'en' ? (ed.draft.content_en || '') : (ed.draft.content || '');
+    if (tVal !== curTitle || sVal !== ed.draft.style || cVal !== curContent) {
       ed.draft.style = sVal;
-      ed.draft.content = cVal;
+      if (ed.editLang === 'en') {
+        ed.draft.title_en = tVal;
+        ed.draft.content_en = cVal;
+        if (ed.isNew && !String(ed.draft.title || '').trim()) ed.draft.title = tVal;
+        if (ed.isNew && !String(ed.draft.content || '').trim()) ed.draft.content = cVal;
+      } else {
+        ed.draft.title = tVal;
+        ed.draft.content = cVal;
+      }
       ed.dirty = true;
     }
   }
-  const hasPayload = Boolean(ed.draft.title.trim() || ed.draft.content.trim() || ed.draft.images.length);
+  const hasPayload = Boolean(
+    String(ed.draft.title || '').trim()
+    || String(ed.draft.content || '').trim()
+    || String(ed.draft.title_en || '').trim()
+    || String(ed.draft.content_en || '').trim()
+    || (ed.draft.images || []).length
+  );
   const merged = (ed.dirty && !(ed.isNew && !hasPayload)) ? _buildMergedInlineSections(ed) : null;
   if (merged) {
     const rec = _findRecordByKindId(ed.kind, ed.id);
@@ -587,7 +629,13 @@ async function _flushInlineSectionOnLeave(rerender = false) {
 
 function canTriggerInlineEdit(event) {
   if (!event) return true;
-  if (event.target && event.target.closest('button, a, input, textarea, select, .itag, .detail-floating-img, .bilingual-sec-wrap, .rep-inline-editor, #inline-sec-editor-box, .uni-inline-editor')) {
+  if (event.target && event.target.closest(
+    'button, a, input, textarea, select, .itag, .en-term-hl, .study-word, .vocab-hl, [data-copy], .code-copy-btn, .sec-inline-edit-btn, .sec-bilingual-btn, .detail-floating-img, .bilingual-sec-wrap, .rep-inline-editor, #inline-sec-editor-box, .uni-inline-editor, .uni-inline-bar'
+  )) {
+    return false;
+  }
+  const codeAncestor = event.target?.closest?.('code');
+  if (codeAncestor && (codeAncestor.dataset.copy !== undefined || codeAncestor.querySelector('button, .copy-btn'))) {
     return false;
   }
   const sel = typeof window.getSelection === 'function' ? window.getSelection() : null;
@@ -597,7 +645,7 @@ function canTriggerInlineEdit(event) {
 
 function onCustomSectionClickEdit(event, kind, id, idx, pane = 'primary', focusTarget = 'content') {
   if (!canTriggerInlineEdit(event)) return;
-  openInlineSectionEditor(kind, id, idx, pane, focusTarget);
+  openInlineSectionEditor(kind, id, idx, pane, focusTarget, event);
 }
 
 let _inlineSecOutsideBound = false;
@@ -616,7 +664,7 @@ function _ensureInlineSectionOutsideClickBinding() {
   });
 }
 
-async function openInlineSectionEditor(kind, id, idx, pane = 'primary', focusTarget = 'content') {
+async function openInlineSectionEditor(kind, id, idx, pane = 'primary', focusTarget = 'content', triggerEv = null) {
   if (typeof flushUniFieldEdit === 'function' && state.uniInlineEdit) {
     await flushUniFieldEdit();
   }
@@ -630,13 +678,34 @@ async function openInlineSectionEditor(kind, id, idx, pane = 'primary', focusTar
   const secs = _getEditableSectionsForRecord(kind, rec);
   if (idx < 0 || idx >= secs.length) return;
   _ensureInlineSectionOutsideClickBinding();
+
+  const draftCopy = _cloneSectionsList([secs[idx]])[0];
+  const isEnUi = state.appLang === 'en';
+  if (isEnUi) {
+    const paneSel = pane === 'secondary' ? '#pane2-content' : `#${kind}-detail`;
+    const secEl = triggerEv?.currentTarget?.closest?.('.sec')
+      || document.querySelector(`${paneSel} .sec[data-sec-idx="${idx}"]`);
+    if (!draftCopy.title_en && secEl) {
+      const domT = secEl.querySelector('.sec-title-row > span:first-child, .code-head > span:first-child')?.textContent?.trim() || '';
+      if (domT) draftCopy.title_en = domT;
+    }
+    if (!draftCopy.content_en && secEl) {
+      const cNode = secEl.querySelector('.detail-canvas-text, .code-pre');
+      if (cNode && !cNode.querySelector('.inline-empty-prompt, .none')) {
+        const domC = (cNode.innerText || cNode.textContent || '').trimEnd();
+        if (domC) draftCopy.content_en = domC;
+      }
+    }
+  }
+
   state.inlineSectionEdit = {
     kind,
     id,
     pane,
     idx,
     origSections: _cloneSectionsList(secs),
-    draft: _cloneSectionsList([secs[idx]])[0],
+    draft: draftCopy,
+    editLang: isEnUi ? 'en' : 'vi',
     isNew: false,
     dirty: false,
     mutated: false,
@@ -657,7 +726,8 @@ async function addInlineNewSection(kind, id, pane = 'primary') {
   if (!rec) return;
   const secs = _getEditableSectionsForRecord(kind, rec);
   _ensureInlineSectionOutsideClickBinding();
-  const newDraft = { id: `sec-${secs.length + 1}`, title: '', style: 'info', content: '', images: [] };
+  const isEnUi = state.appLang === 'en';
+  const newDraft = { id: `sec-${secs.length + 1}`, title: '', style: 'info', content: '', title_en: '', content_en: '', images: [] };
   state.inlineSectionEdit = {
     kind,
     id,
@@ -665,6 +735,7 @@ async function addInlineNewSection(kind, id, pane = 'primary') {
     idx: secs.length,
     origSections: _cloneSectionsList(secs),
     draft: newDraft,
+    editLang: isEnUi ? 'en' : 'vi',
     isNew: true,
     dirty: false,
     mutated: false,
@@ -674,23 +745,62 @@ async function addInlineNewSection(kind, id, pane = 'primary') {
   _rerenderInlineHost(kind, id, pane, false);
 }
 
+function toggleInlineSectionEditLang() {
+  const ed = state.inlineSectionEdit;
+  if (!ed) return;
+  const box = document.getElementById('inline-sec-editor-box');
+  if (box) {
+    const tVal = box.querySelector('.sec-title-inp')?.value || '';
+    const sVal = box.querySelector('.sec-style-sel')?.value || 'info';
+    const cVal = box.querySelector('.sec-content-inp')?.value || '';
+    ed.draft.style = sVal;
+    if (ed.editLang === 'en') {
+      ed.draft.title_en = tVal;
+      ed.draft.content_en = cVal;
+    } else {
+      ed.draft.title = tVal;
+      ed.draft.content = cVal;
+    }
+  }
+  ed.editLang = ed.editLang === 'en' ? 'vi' : 'en';
+  ed.focusTarget = 'content';
+  _rerenderInlineHost(ed.kind, ed.id, ed.pane, false);
+}
+
 async function finishInlineSectionEdit(silent = false) {
   clearTimeout(_inlineSecSaveTimer);
   const ed = state.inlineSectionEdit;
   if (!ed) return;
   const box = document.getElementById('inline-sec-editor-box');
   if (box) {
-    ed.draft.title = box.querySelector('.sec-title-inp')?.value || '';
-    ed.draft.style = box.querySelector('.sec-style-sel')?.value || 'info';
-    ed.draft.content = box.querySelector('.sec-content-inp')?.value || '';
+    const tVal = box.querySelector('.sec-title-inp')?.value || '';
+    const sVal = box.querySelector('.sec-style-sel')?.value || 'info';
+    const cVal = box.querySelector('.sec-content-inp')?.value || '';
+    ed.draft.style = sVal;
+    if (ed.editLang === 'en') {
+      ed.draft.title_en = tVal;
+      ed.draft.content_en = cVal;
+      if (ed.isNew && !String(ed.draft.title || '').trim()) ed.draft.title = tVal;
+      if (ed.isNew && !String(ed.draft.content || '').trim()) ed.draft.content = cVal;
+    } else {
+      ed.draft.title = tVal;
+      ed.draft.content = cVal;
+    }
   }
-  if (ed.dirty || (ed.draft.title.trim() || ed.draft.content.trim() || ed.draft.images.length)) {
+  const hasAny = Boolean(
+    String(ed.draft.title || '').trim()
+    || String(ed.draft.content || '').trim()
+    || String(ed.draft.title_en || '').trim()
+    || String(ed.draft.content_en || '').trim()
+    || (ed.draft.images || []).length
+  );
+  if (ed.dirty || hasAny) {
     await saveInlineSectionNow(false);
   }
   const { kind, id, pane } = ed;
   state.inlineSectionEdit = null;
   _rerenderInlineHost(kind, id, pane, false);
-  if (!silent) showToast('Đã lưu & hoàn tất chỉnh sửa mục', 'success');
+  if (!silent) showToast(state.appLang === 'en' ? 'Section saved' : 'Đã lưu & hoàn tất chỉnh sửa mục', 'success');
 }
 
 async function cancelInlineSectionEdit() {
@@ -773,11 +883,18 @@ function _hydrateInlineSectionEditor(rootEl) {
   const stEl = box.querySelector('#inline-save-status');
 
   const markDirty = () => {
-    ed.draft.title = titleInp.value;
     ed.draft.style = styleSel.value;
-    ed.draft.content = contentTa.value;
+    if (ed.editLang === 'en') {
+      ed.draft.title_en = titleInp.value;
+      ed.draft.content_en = contentTa.value;
+      if (ed.isNew && !String(ed.draft.title || '').trim()) ed.draft.title = titleInp.value;
+      if (ed.isNew && !String(ed.draft.content || '').trim()) ed.draft.content = contentTa.value;
+    } else {
+      ed.draft.title = titleInp.value;
+      ed.draft.content = contentTa.value;
+    }
     ed.dirty = true;
-    if (stEl) { stEl.textContent = 'ĐANG GÕ...'; stEl.style.color = 'var(--amber)'; }
+    if (stEl) { stEl.textContent = state.appLang === 'en' ? 'TYPING...' : 'ĐANG GÕ...'; stEl.style.color = 'var(--amber)'; }
     clearTimeout(_inlineSecSaveTimer);
     _inlineSecSaveTimer = setTimeout(() => saveInlineSectionNow(false), 650);
   };
@@ -788,6 +905,7 @@ function _hydrateInlineSectionEditor(rootEl) {
     contentTa.style.height = `${Math.max(120, contentTa.scrollHeight + 6)}px`;
   };
   autoResizeSecTa();
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(autoResizeSecTa);
 
   titleInp.addEventListener('input', markDirty);
   titleInp.addEventListener('keydown', (e) => {
@@ -798,6 +916,9 @@ function _hydrateInlineSectionEditor(rootEl) {
     } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
       finishInlineSectionEdit(true);
+    } else if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault();
+      saveInlineSectionNow(true);
     }
   });
   styleSel.addEventListener('change', () => {
@@ -820,6 +941,9 @@ function _hydrateInlineSectionEditor(rootEl) {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
       finishInlineSectionEdit(true);
+    } else if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault();
+      saveInlineSectionNow(true);
     }
   });
 
@@ -863,6 +987,7 @@ function renderCustomSectionsHtml(sections = [], prefixKey = 'sec', highlightTag
   const renderList = [...(sections || [])];
   const hasDraftNew = Boolean(inlineOpts && ed && ed.kind === inlineOpts.kind && ed.id === inlineOpts.id && ed.pane === inlineOpts.pane && ed.idx >= renderList.length);
   if (hasDraftNew) renderList.push(ed.draft);
+  const isEnUi = typeof state !== 'undefined' && state.appLang === 'en';
 
   const fmt = (txt) => highlightTagsHtml(txt, highlightTags || [], []);
 
@@ -872,11 +997,25 @@ function renderCustomSectionsHtml(sections = [], prefixKey = 'sec', highlightTag
       const styleOpts = SECTION_STYLE_OPTIONS.map((o) =>
         `<option value="${o.value}" ${(ed.draft.style || 'info') === o.value ? 'selected' : ''}>${escapeHtml(o.label)}</option>`
       ).join('');
-      const stText = ed.saving ? 'ĐANG LƯU...' : (ed.dirty ? 'CHƯA LƯU' : (ed.isNew && !ed.draft.title && !ed.draft.content && !ed.draft.images.length ? 'NHẬP NỘI DUNG ĐỂ LƯU' : 'ĐÃ LƯU TỰ ĐỘNG'));
+      const editIsEn = ed.editLang === 'en';
+      const titleVal = editIsEn ? (ed.draft.title_en ?? ed.draft.title ?? '') : (ed.draft.title ?? '');
+      const contentVal = editIsEn ? (ed.draft.content_en ?? ed.draft.content ?? '') : (ed.draft.content ?? '');
+      const hasAnyTxt = Boolean(String(titleVal).trim() || String(contentVal).trim() || (ed.draft.images || []).length);
+      const stText = ed.saving
+        ? (isEnUi ? '⏳ Saving...' : '⏳ ĐANG LƯU...')
+        : (ed.dirty
+          ? (isEnUi ? 'UNSAVED' : 'CHƯA LƯU')
+          : (ed.isNew && !hasAnyTxt ? (isEnUi ? 'TYPE TO SAVE' : 'NHẬP NỘI DUNG ĐỂ LƯU') : (isEnUi ? '✓ Saved' : '✓ Đã lưu')));
+      const langPillLabel = isEnUi
+        ? (editIsEn ? '🇬🇧 Editing EN · Switch to VI' : '🇻🇳 Editing VI · Switch to EN')
+        : (editIsEn ? '🇬🇧 Đang sửa bản EN · Sửa bản gốc VI' : '🇻🇳 Đang sửa bản VI · Sửa bản EN');
+      const langPillHtml = (isEnUi || ed.draft.title_en || ed.draft.content_en)
+        ? `<button type="button" class="btn btn-sm inline-lang-btn ${editIsEn ? 'is-en' : 'is-vi'}" data-no-i18n="1" onclick="toggleInlineSectionEditLang()" title="${isEnUi ? (editIsEn ? 'Switch to edit Vietnamese original' : 'Switch to edit English version') : (editIsEn ? 'Chuyển sang sửa bản gốc Tiếng Việt' : 'Bấm để chuyển sang sửa bản Tiếng Anh')}">${langPillLabel}</button>`
+        : '';
       return `
-        <div class="sec inline-sec-editor" id="inline-sec-editor-box" data-style="${escapeHtml(ed.draft.style || 'info')}">
+        <div class="sec inline-sec-editor" id="inline-sec-editor-box" data-no-i18n="1" data-sec-idx="${idx}" data-style="${escapeHtml(ed.draft.style || 'info')}">
           <div class="custom-sec-head">
-            <input type="text" class="inp sec-title-inp" spellcheck="false" placeholder="Tên mục (VD: CÁC BƯỚC XỬ LÝ VẤN ĐỀ, CODE SCL...)" value="${escapeHtml(ed.draft.title || '')}" />
+            <input type="text" class="inp sec-title-inp" spellcheck="false" placeholder="${editIsEn ? 'Section title (EN)...' : 'Tên mục (VD: CÁC BƯỚC XỬ LÝ VẤN ĐỀ, CODE SCL...)'}" value="${escapeHtml(titleVal)}" />
             <select class="sel sec-style-sel">${styleOpts}</select>
             <div class="sec-ops">
               <button type="button" class="btn btn-sm sec-img-btn" title="Chèn ảnh từ máy hoặc nhấn Ctrl+V vào khung dưới">+ Ảnh</button>
@@ -886,30 +1025,35 @@ function renderCustomSectionsHtml(sections = [], prefixKey = 'sec', highlightTag
             </div>
           </div>
           <div class="rich-canvas-box inline-canvas-box">
-            <textarea id="inline-sec-textarea" class="sec-content-inp" spellcheck="false" rows="6" placeholder="Gõ nội dung xử lý, bước làm hoặc bấm Ctrl+V dán ảnh chụp màn hình và kéo thả tự do...">${escapeHtml(ed.draft.content || '')}</textarea>
+            <textarea id="inline-sec-textarea" class="sec-content-inp" spellcheck="false" rows="6" placeholder="${editIsEn ? 'Edit English content (Ctrl+Enter save, Esc cancel)...' : 'Gõ nội dung xử lý, bước làm hoặc bấm Ctrl+V dán ảnh chụp màn hình và kéo thả tự do...'}">${escapeHtml(contentVal)}</textarea>
             <div class="canvas-images-layer"></div>
           </div>
           <div class="inline-sec-foot">
-            <span class="mono" style="font-size:12px;color:var(--text-3);">Ctrl+V dán ảnh kéo thả · Ctrl+S lưu · Ctrl+Enter xong</span>
-            <div style="display:flex;align-items:center;gap:8px;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              ${langPillHtml}
+              <span class="mono" style="font-size:11.5px;color:var(--text-3);">${isEnUi ? 'Ctrl+Enter save · Esc cancel' : 'Ctrl+V dán ảnh · Ctrl+Enter lưu · Esc hủy'}</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
               <span id="inline-save-status" class="inline-save-status">${stText}</span>
-              <button type="button" class="btn btn-sm" onclick="cancelInlineSectionEdit()">↩ Hủy</button>
-              <button type="button" class="btn btn-sm btn-primary" onclick="finishInlineSectionEdit()">✓ Lưu &amp; Xong</button>
+              <button type="button" class="btn btn-sm" onclick="cancelInlineSectionEdit()">${isEnUi ? '↩ Cancel (Esc)' : '↩ Hủy (Esc)'}</button>
+              <button type="button" class="btn btn-sm btn-primary" onclick="finishInlineSectionEdit(true)">${isEnUi ? '✓ Save (Ctrl+Enter)' : '✓ Lưu (Ctrl+Enter)'}</button>
             </div>
           </div>
         </div>`;
     }
 
-    const title = s.title || `MỤC ${pad2(idx + 1)}`;
     const style = s.style || 'info';
-    const rawContent = String(s.content || '');
+    const hasCustomTitleEn = Boolean(isEnUi && String(s.title_en || '').trim());
+    const hasCustomContentEn = Boolean(isEnUi && String(s.content_en || '').trim());
+    const title = hasCustomTitleEn ? String(s.title_en).trim() : (s.title || `${isEnUi ? 'SECTION' : 'MỤC'} ${pad2(idx + 1)}`);
+    const rawContent = hasCustomContentEn ? String(s.content_en) : String(s.content || '');
     const content = style === 'code' ? rawContent.replace(/^\n+|\n+$/g, '') : rawContent.trim();
     const imgs = s.images || [];
     const secKey = `${prefixKey}:${idx}`;
     sectionRawTextMap[secKey] = {
       secKey,
-      title,
-      content,
+      title: s.title || title,
+      content: String(s.content || rawContent).trim(),
       style,
       recordId: inlineOpts?.id || '',
       kind: inlineOpts?.kind || '',
@@ -917,7 +1061,10 @@ function renderCustomSectionsHtml(sections = [], prefixKey = 'sec', highlightTag
     const showBiCtl = !String(prefixKey || '').startsWith('fc-');
     const biOn = Boolean(showBiCtl && state.bilingualSections?.[secKey]?.open);
     const biBtnHtml = showBiCtl
-      ? `<button type="button" class="btn btn-sm sec-bilingual-btn ${biOn ? 'split-on' : ''}" data-bi-key="${escapeHtml(secKey)}" onclick="event.stopPropagation(); toggleSectionBilingual('${escapeHtml(secKey)}')" title="Đối chiếu Song ngữ Việt ⇄ Anh cho khối này">🇬🇧 Song ngữ</button>`
+      ? `<button type="button" class="btn btn-sm sec-bilingual-btn ${biOn ? 'split-on' : ''}" data-bi-key="${escapeHtml(secKey)}" data-no-i18n="1" onclick="event.stopPropagation(); toggleSectionBilingual('${escapeHtml(secKey)}')" title="${isEnUi ? 'Toggle Vietnamese ⇄ English bilingual panel' : 'Đối chiếu Song ngữ Việt ⇄ Anh cho khối này'}">${isEnUi ? '🇬🇧 Bilingual' : '🇬🇧 Song ngữ'}</button>`
+      : '';
+    const editSecBtnHtml = inlineOpts
+      ? `<button type="button" class="btn btn-sm sec-inline-edit-btn" data-no-i18n="1" onclick="event.stopPropagation(); openInlineSectionEditor('${escapeHtml(inlineOpts.kind)}', '${escapeHtml(inlineOpts.id)}', ${idx}, '${escapeHtml(inlineOpts.pane)}', 'content', event)" title="${isEnUi ? 'Edit this block' : 'Chỉnh sửa khối nội dung này'}">${isEnUi ? '✎ Edit' : '✎ Sửa'}</button>`
       : '';
     const biPanelHtml = showBiCtl
       ? `<div id="bilingual-box-${escapeHtml(secKey)}" class="bilingual-sec-wrap ${biOn ? '' : 'hidden'}">${biOn && typeof renderCachedBilingualSectionHtml === 'function' ? renderCachedBilingualSectionHtml(secKey) : ''}</div>`
@@ -936,38 +1083,41 @@ function renderCustomSectionsHtml(sections = [], prefixKey = 'sec', highlightTag
     const contentTriggerCall = inlineOpts
       ? `onCustomSectionClickEdit(event, '${escapeHtml(inlineOpts.kind)}', '${escapeHtml(inlineOpts.id)}', ${idx}, '${escapeHtml(inlineOpts.pane)}', 'content')"`
       : '';
+    const customTitleAttr = hasCustomTitleEn ? 'data-has-custom-en="1" data-no-i18n="1"' : '';
+    const customContentAttr = hasCustomContentEn ? 'data-has-custom-en="1" data-no-i18n="1"' : '';
     const titleAttrs = inlineOpts
-      ? `class="uni-editable-title" data-inline-sec-trigger="1" onclick="${titleTriggerCall}"`
-      : '';
-    const headOpsHtml = biBtnHtml
-      ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">${biBtnHtml}</div>`
+      ? `class="uni-editable-title" data-inline-sec-trigger="1" ${customTitleAttr} onclick="${titleTriggerCall}"`
+      : customTitleAttr;
+    const headOpsHtml = (editSecBtnHtml || biBtnHtml)
+      ? `<div class="sec-head-ops" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">${editSecBtnHtml}${biBtnHtml}</div>`
       : '';
 
     const emptyHtml = inlineOpts
-      ? `<div class="inline-empty-prompt">+ Mục này đang trống — chạm vào đây để viết hoặc dán ảnh (Ctrl+V) ngay...</div>`
-      : '<span style="color:var(--text-3);">— Trống —</span>';
+      ? `<div class="inline-empty-prompt">${isEnUi ? '+ Empty section — click here to write or paste image (Ctrl+V)...' : '+ Mục này đang trống — chạm vào đây để viết hoặc dán ảnh (Ctrl+V) ngay...'}</div>`
+      : `<span style="color:var(--text-3);">${isEnUi ? '— Empty —' : '— Trống —'}</span>`;
 
     const boxAttrs = inlineOpts
       ? `class="detail-canvas-box uni-editable-block" data-inline-sec-trigger="1" onclick="${contentTriggerCall}"`
       : `class="detail-canvas-box"`;
 
-    const innerBox = `<div ${boxAttrs}${minH ? ` style="min-height:${Math.ceil(minH)}px;"` : ''}><div class="detail-canvas-text">${content ? fmt(content) : (imgs.length ? '' : emptyHtml)}</div>${imgsHtml}</div>${biPanelHtml}`;
+    const innerBox = `<div ${boxAttrs}${minH ? ` style="min-height:${Math.ceil(minH)}px;"` : ''}><div class="detail-canvas-text" ${customContentAttr}>${content ? fmt(content) : (imgs.length ? '' : emptyHtml)}</div>${imgsHtml}</div>${biPanelHtml}`;
 
     if (style === 'code') {
       const bufKey = `${prefixKey}:${idx}`;
       codeBufferMap[bufKey] = content;
       return `
-        <div class="sec">
+        <div class="sec" data-sec-idx="${idx}">
           <div class="code-box">
             <div class="code-head">
               <span style="color:var(--amber);font-weight:700;" ${titleAttrs}>${escapeHtml(title)}</span>
-              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                <button type="button" class="btn btn-sm" onclick="copyCodeBlock(this, '${escapeHtml(bufKey)}')">Copy</button>
+              <div class="sec-head-ops" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                <button type="button" class="btn btn-sm code-copy-btn" onclick="event.stopPropagation(); copyCodeBlock(this, '${escapeHtml(bufKey)}')">Copy</button>
+                ${editSecBtnHtml}
                 ${biBtnHtml}
               </div>
             </div>
             <div ${boxAttrs} ${minH ? `style="min-height:${Math.ceil(minH)}px;"` : ''}>
-              ${content ? `<pre class="code-pre">${escapeHtml(content)}</pre>` : (imgs.length ? '' : `<div style="padding:12px 14px;">${emptyHtml}</div>`)}
+              ${content ? `<pre class="code-pre" ${customContentAttr}>${escapeHtml(content)}</pre>` : (imgs.length ? '' : `<div style="padding:12px 14px;">${emptyHtml}</div>`)}
               ${imgsHtml}
             </div>
             ${biPanelHtml}
@@ -975,19 +1125,19 @@ function renderCustomSectionsHtml(sections = [], prefixKey = 'sec', highlightTag
         </div>`;
     }
     if (style === 'warn') {
-      return `<div class="sec"><div class="warn"><div class="warn-title sec-title-row"><span ${titleAttrs}>${escapeHtml(title)}</span>${headOpsHtml}</div><div class="warn-body">${innerBox}</div></div></div>`;
+      return `<div class="sec" data-sec-idx="${idx}"><div class="warn"><div class="warn-title sec-title-row"><span ${titleAttrs}>${escapeHtml(title)}</span>${headOpsHtml}</div><div class="warn-body">${innerBox}</div></div></div>`;
     }
     if (style === 'pitfall') {
-      return `<div class="sec"><div class="pitfall-block"><div class="nb-title sec-title-row"><span ${titleAttrs}>${escapeHtml(title)}</span>${headOpsHtml}</div><div class="nb-body">${innerBox}</div></div></div>`;
+      return `<div class="sec" data-sec-idx="${idx}"><div class="pitfall-block"><div class="nb-title sec-title-row"><span ${titleAttrs}>${escapeHtml(title)}</span>${headOpsHtml}</div><div class="nb-body">${innerBox}</div></div></div>`;
     }
     if (style === 'qa') {
-      return `<div class="sec"><div class="qa-block"><div class="nb-title sec-title-row"><span ${titleAttrs}>${escapeHtml(title)}</span>${headOpsHtml}</div><div class="nb-body">${innerBox}</div></div></div>`;
+      return `<div class="sec" data-sec-idx="${idx}"><div class="qa-block"><div class="nb-title sec-title-row"><span ${titleAttrs}>${escapeHtml(title)}</span>${headOpsHtml}</div><div class="nb-body">${innerBox}</div></div></div>`;
     }
-    return `<div class="sec"><div class="note-block accent"><div class="nb-title sec-title-row"><span ${titleAttrs}>${escapeHtml(title)}</span>${headOpsHtml}</div><div class="nb-body">${innerBox}</div></div></div>`;
+    return `<div class="sec" data-sec-idx="${idx}"><div class="note-block accent"><div class="nb-title sec-title-row"><span ${titleAttrs}>${escapeHtml(title)}</span>${headOpsHtml}</div><div class="nb-body">${innerBox}</div></div></div>`;
   }).join('');
 
   const addBarHtml = inlineOpts && !hasDraftNew
-    ? `<div class="inline-add-sec-bar"><button type="button" class="btn btn-sm inline-add-sec-btn" onclick="addInlineNewSection('${escapeHtml(inlineOpts.kind)}', '${escapeHtml(inlineOpts.id)}', '${escapeHtml(inlineOpts.pane)}')">+ Thêm mục mới ngay tại đây (viết chữ · dán ảnh Ctrl+V)</button></div>`
+    ? `<div class="inline-add-sec-bar"><button type="button" class="btn btn-sm inline-add-sec-btn" data-no-i18n="1" onclick="addInlineNewSection('${escapeHtml(inlineOpts.kind)}', '${escapeHtml(inlineOpts.id)}', '${escapeHtml(inlineOpts.pane)}')">${isEnUi ? '+ Add new section here (text · paste image Ctrl+V)' : '+ Thêm mục mới ngay tại đây (viết chữ · dán ảnh Ctrl+V)'}</button></div>`
     : '';
 
   return cardsHtml + addBarHtml;
@@ -1141,17 +1291,36 @@ function _getUniRecord(kind, id) {
   return null;
 }
 
+function _getUniDisplayText(kind, rec, field, useEn = (typeof state !== 'undefined' && state.appLang === 'en')) {
+  if (!rec) return '';
+  if (useEn && kind !== 'english_card') {
+    const enOv = rec.en_overrides_json && typeof rec.en_overrides_json === 'object' ? rec.en_overrides_json : {};
+    if (String(enOv[field] || '').trim()) {
+      return { text: String(enOv[field]), hasCustomEn: true };
+    }
+  }
+  return { text: String(rec[field] || ''), hasCustomEn: false };
+}
+
 function _uniRenderHostDisplay(kind, rec, field, hostEl) {
   if (!hostEl || !rec) return;
   const isEn = state.appLang === 'en';
   delete hostEl.dataset.viHtmlOrig;
   delete hostEl.dataset.viTextOrig;
+  delete hostEl.dataset.hasCustomEn;
+  delete hostEl.dataset.noI18n;
   hostEl.classList.remove('uni-inline-editing');
   hostEl.classList.add('uni-editable');
 
+  const { text: rawDisp, hasCustomEn } = _getUniDisplayText(kind, rec, field, isEn);
+  if (hasCustomEn) {
+    hostEl.dataset.hasCustomEn = '1';
+    hostEl.dataset.noI18n = '1';
+  }
+
   if (kind === 'knowledge') {
     if (field === 'topic_model') {
-      hostEl.textContent = rec.topic_model || '';
+      hostEl.textContent = rawDisp || rec.topic_model || '';
       return;
     }
     if (field === 'core_concept_workflow' && isSopCategory(rec.category)) {
@@ -1159,14 +1328,14 @@ function _uniRenderHostDisplay(kind, rec, field, hostEl) {
         hostEl.innerHTML = renderKnowledgeSopListInnerHtml(rec, true);
         const sopCountEl = hostEl.closest('.sec')?.querySelector('.sop-count');
         if (sopCountEl && typeof parseSopSteps === 'function') {
-          const steps = parseSopSteps(rec.core_concept_workflow);
+          const steps = parseSopSteps(rawDisp || rec.core_concept_workflow);
           const done = steps.filter((_, i) => state.sopChecked[`${rec.id}:${i}`]).length;
           sopCountEl.textContent = `${done} / ${steps.length} ${isEn ? 'DONE' : 'HOÀN THÀNH'}`;
         }
         return;
       }
     }
-    const val = String(rec[field] || '').trim();
+    const val = String(rawDisp || '').trim();
     hostEl.innerHTML = val
       ? highlightTagsHtml(val, rec.component_tags || [])
       : `<span class="none">${isEn ? '— Empty (click to add) —' : '— Chưa có (chạm để nhập) —'}</span>`;
@@ -1174,11 +1343,11 @@ function _uniRenderHostDisplay(kind, rec, field, hostEl) {
   }
 
   if (kind === 'plc') {
-    hostEl.textContent = rec.title || '';
+    hostEl.textContent = rawDisp || rec.title || '';
     return;
   }
   if (kind === 'network') {
-    hostEl.textContent = rec.target_device || '';
+    hostEl.textContent = rawDisp || rec.target_device || '';
     return;
   }
   if (kind === 'english_card') {
@@ -1258,12 +1427,61 @@ function _uniSyncListAndChrome(kind, saved) {
   if (state.splitMode && state.pane2?.group === kind && state.pane2?.id === saved.id) renderPane2();
 }
 
+function _renderUniInlineBarHtml(ed, isEnUi) {
+  const editIsEn = ed.editLang === 'en';
+  const showLangBtn = ed.kind !== 'english_card' && (isEnUi || Boolean(ed.origEn));
+  const langLabel = isEnUi
+    ? (editIsEn ? '🇬🇧 Editing EN · Switch to VI' : '🇻🇳 Editing VI · Switch to EN')
+    : (editIsEn ? '🇬🇧 Đang sửa bản EN · Sửa bản gốc VI' : '🇻🇳 Đang sửa bản VI · Sửa bản EN');
+  const langBtn = showLangBtn
+    ? `<button type="button" class="btn btn-sm inline-lang-btn ${editIsEn ? 'is-en' : 'is-vi'}" data-no-i18n="1" onmousedown="event.preventDefault()" onclick="toggleUniEditLang(event)">${langLabel}</button>`
+    : '';
+  return `
+    <div class="uni-inline-bar" data-no-i18n="1">
+      <div class="uni-inline-bar-left">
+        ${langBtn}
+        <span class="uni-inline-st" data-uni-st="1">${isEnUi ? '✓ Ready' : '✓ Sẵn sàng'}</span>
+      </div>
+      <div class="uni-inline-bar-btns">
+        <button type="button" class="btn btn-sm" onmousedown="event.preventDefault()" onclick="cancelUniFieldEdit()">${isEnUi ? 'Cancel (Esc)' : 'Hủy (Esc)'}</button>
+        <button type="button" class="btn btn-sm btn-primary" onmousedown="event.preventDefault()" onclick="commitUniFieldEdit(true)">${isEnUi ? 'Save (Ctrl+Enter)' : 'Lưu (Ctrl+Enter)'}</button>
+      </div>
+    </div>`;
+}
+
+function toggleUniEditLang(event) {
+  if (event) event.stopPropagation();
+  const ed = state.uniInlineEdit;
+  if (!ed || ed.saving || ed.cancelling) return;
+  const inp = ed.hostEl?.querySelector('.uni-inline-inp, .uni-inline-ta');
+  if (inp) {
+    if (ed.editLang === 'en') ed.draftEn = inp.value;
+    else ed.draftVi = inp.value;
+  }
+  ed.editLang = ed.editLang === 'en' ? 'vi' : 'en';
+  const nextText = ed.editLang === 'en'
+    ? (ed.draftEn !== undefined ? ed.draftEn : (ed.origEn || ed.prefillEn || ed.origVi || ''))
+    : (ed.draftVi !== undefined ? ed.draftVi : (ed.origVi || ''));
+  if (inp) {
+    inp.value = nextText;
+    if (inp.classList.contains('uni-inline-ta')) {
+      inp.style.height = 'auto';
+      inp.style.height = `${Math.max(64, inp.scrollHeight + 6)}px`;
+    }
+    inp.focus({ preventScroll: true });
+  }
+  const bar = ed.hostEl?.querySelector('.uni-inline-bar');
+  if (bar) {
+    bar.outerHTML = _renderUniInlineBarHtml(ed, state.appLang === 'en');
+  }
+}
+
 async function startUniFieldEdit(kind, id, field, event, opts = {}) {
   if (!opts.skipGuard && !canTriggerInlineEdit(event)) return;
   const cur = state.uniInlineEdit;
   if (cur && cur.kind === kind && String(cur.id) === String(id) && cur.field === field) return;
   if (state.inlineSectionEdit) await _flushInlineSectionOnLeave(true);
-  if (cur) await commitUniFieldEdit();
+  if (cur) await commitUniFieldEdit(false);
 
   const rec = _getUniRecord(kind, id);
   const hostEl = event?.currentTarget
@@ -1272,8 +1490,18 @@ async function startUniFieldEdit(kind, id, field, event, opts = {}) {
 
   const pane = hostEl.closest('.detail-pane');
   const savedScroll = pane ? pane.scrollTop : 0;
-  const origValue = String(rec[field] || '');
   const isEn = state.appLang === 'en';
+  const origVi = String(rec[field] || '');
+  const enOvObj = (rec.en_overrides_json && typeof rec.en_overrides_json === 'object') ? rec.en_overrides_json : {};
+  const origEn = String(enOvObj[field] || '');
+
+  let domShown = '';
+  if (isEn && kind !== 'english_card' && !hostEl.querySelector('.none, .inline-empty-prompt')) {
+    domShown = String(hostEl.innerText || hostEl.textContent || '').trim();
+  }
+  const prefillEn = origEn || domShown || origVi;
+  const editLang = (isEn && kind !== 'english_card') ? 'en' : 'vi';
+  const initialValue = editLang === 'en' ? prefillEn : origVi;
 
   delete hostEl.dataset.viHtmlOrig;
   delete hostEl.dataset.viTextOrig;
@@ -1284,7 +1512,11 @@ async function startUniFieldEdit(kind, id, field, event, opts = {}) {
     kind,
     id,
     field,
-    origValue,
+    editLang,
+    origVi,
+    origEn,
+    prefillEn,
+    origValue: initialValue,
     hostEl,
     pane,
     singleLine: Boolean(opts.singleLine),
@@ -1292,13 +1524,19 @@ async function startUniFieldEdit(kind, id, field, event, opts = {}) {
     cancelling: false,
     _handledKey: false,
   };
+  const edObj = state.uniInlineEdit;
+  const barHtml = _renderUniInlineBarHtml(edObj, isEn);
 
   if (opts.singleLine) {
-    hostEl.innerHTML = `<div class="uni-inline-editor"><input type="text" class="inp uni-inline-inp" spellcheck="false" placeholder="${escapeHtml(opts.placeholder || (isEn ? 'Enter text...' : 'Nhập nội dung...'))}" /></div>`;
+    hostEl.innerHTML = `<div class="uni-inline-editor"><input type="text" class="inp uni-inline-inp" spellcheck="false" placeholder="${escapeHtml(opts.placeholder || (isEn ? 'Enter text...' : 'Nhập nội dung...'))}" />${barHtml}</div>`;
     const inp = hostEl.querySelector('.uni-inline-inp');
-    inp.value = origValue;
+    inp.value = initialValue;
     inp.focus({ preventScroll: true });
     try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (_) {}
+    inp.addEventListener('input', () => {
+      const st = hostEl.querySelector('[data-uni-st]');
+      if (st) { st.textContent = isEn ? 'Unsaved' : 'Chưa lưu'; st.style.color = 'var(--amber)'; }
+    });
     inp.addEventListener('keydown', (e) => {
       const ed = state.uniInlineEdit;
       if (!ed || ed.hostEl !== hostEl) return;
@@ -1313,26 +1551,31 @@ async function startUniFieldEdit(kind, id, field, event, opts = {}) {
         e.preventDefault();
         e.stopPropagation();
         ed._handledKey = true;
-        commitUniFieldEdit();
+        commitUniFieldEdit(true);
       }
     });
     inp.addEventListener('blur', () => {
       const ed = state.uniInlineEdit;
       if (!ed || ed.hostEl !== hostEl || ed.cancelling || ed.saving || ed._handledKey) return;
-      commitUniFieldEdit();
+      commitUniFieldEdit(false);
     });
   } else {
-    hostEl.innerHTML = `<div class="uni-inline-editor"><textarea class="inp uni-inline-ta" rows="2" spellcheck="false" placeholder="${escapeHtml(opts.placeholder || (isEn ? 'Enter content (Ctrl+Enter save, Esc cancel)...' : 'Nhập nội dung (Ctrl+Enter lưu, Esc hủy)...'))}"></textarea></div>`;
+    hostEl.innerHTML = `<div class="uni-inline-editor"><textarea class="inp uni-inline-ta" rows="2" spellcheck="false" placeholder="${escapeHtml(opts.placeholder || (isEn ? 'Enter content (Ctrl+Enter save, Esc cancel)...' : 'Nhập nội dung (Ctrl+Enter lưu, Esc hủy)...'))}"></textarea>${barHtml}</div>`;
     const ta = hostEl.querySelector('.uni-inline-ta');
-    ta.value = origValue;
+    ta.value = initialValue;
     const resize = () => {
       ta.style.height = 'auto';
-      ta.style.height = `${Math.max(60, ta.scrollHeight + 4)}px`;
+      ta.style.height = `${Math.max(64, ta.scrollHeight + 6)}px`;
     };
     resize();
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(resize);
     ta.focus({ preventScroll: true });
     try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (_) {}
-    ta.addEventListener('input', resize);
+    ta.addEventListener('input', () => {
+      resize();
+      const st = hostEl.querySelector('[data-uni-st]');
+      if (st) { st.textContent = isEn ? 'Unsaved' : 'Chưa lưu'; st.style.color = 'var(--amber)'; }
+    });
     ta.addEventListener('keydown', (e) => {
       const ed = state.uniInlineEdit;
       if (!ed || ed.hostEl !== hostEl) return;
@@ -1343,17 +1586,17 @@ async function startUniFieldEdit(kind, id, field, event, opts = {}) {
         cancelUniFieldEdit();
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'Enter' || e.key === 's' || e.key === 'S')) {
         e.preventDefault();
         e.stopPropagation();
         ed._handledKey = true;
-        commitUniFieldEdit();
+        commitUniFieldEdit(true);
       }
     });
     ta.addEventListener('blur', () => {
       const ed = state.uniInlineEdit;
       if (!ed || ed.hostEl !== hostEl || ed.cancelling || ed.saving || ed._handledKey) return;
-      commitUniFieldEdit();
+      commitUniFieldEdit(false);
     });
   }
 
@@ -1374,16 +1617,17 @@ function cancelUniFieldEdit() {
 }
 
 function flushUniFieldEdit() {
-  if (state.uniInlineEdit) return commitUniFieldEdit();
+  if (state.uniInlineEdit) return commitUniFieldEdit(false);
   return Promise.resolve();
 }
 
-async function commitUniFieldEdit() {
+async function commitUniFieldEdit(explicitSave = false) {
   const ed = state.uniInlineEdit;
   if (!ed || ed.saving || ed.cancelling) return;
   const inp = ed.hostEl?.querySelector('.uni-inline-inp, .uni-inline-ta');
   const nextVal = String(inp ? inp.value : '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
-  const origVal = String(ed.origValue || '').trim();
+  const curOrigForLang = ed.editLang === 'en' ? String(ed.origEn || '').trim() : String(ed.origVi || '').trim();
+  const origShown = String(ed.origValue || '').trim();
   const savedScroll = ed.pane ? ed.pane.scrollTop : 0;
   const isEn = state.appLang === 'en';
 
@@ -1401,6 +1645,7 @@ async function commitUniFieldEdit() {
     const rec = _getUniRecord(ed.kind, ed.id);
     if (rec) _uniRenderHostDisplay(ed.kind, rec, ed.field, ed.hostEl);
     if (ed.pane) ed.pane.scrollTop = savedScroll;
+    if (isEn && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
     return;
   }
 
@@ -1408,7 +1653,11 @@ async function commitUniFieldEdit() {
   const rec = _getUniRecord(ed.kind, ed.id);
   if (!rec) return;
 
-  if (nextVal === origVal) {
+  const nothingChanged = ed.editLang === 'en'
+    ? (nextVal === curOrigForLang || (!explicitSave && nextVal === origShown && !curOrigForLang))
+    : (nextVal === curOrigForLang);
+
+  if (nothingChanged) {
     _uniRenderHostDisplay(ed.kind, rec, ed.field, ed.hostEl);
     if (ed.pane) ed.pane.scrollTop = savedScroll;
     if (isEn && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
@@ -1416,65 +1665,39 @@ async function commitUniFieldEdit() {
   }
 
   const prevVal = rec[ed.field];
-  rec[ed.field] = nextVal;
+  const prevEnOv = { ...(rec.en_overrides_json || {}) };
+  if (ed.editLang === 'en' && ed.kind !== 'english_card') {
+    rec.en_overrides_json = { ...(rec.en_overrides_json || {}) };
+    if (nextVal) rec.en_overrides_json[ed.field] = nextVal;
+    else delete rec.en_overrides_json[ed.field];
+  } else {
+    rec[ed.field] = nextVal;
+  }
   _uniRenderHostDisplay(ed.kind, rec, ed.field, ed.hostEl);
   if (ed.pane) ed.pane.scrollTop = savedScroll;
 
   try {
     let url = '';
+    let method = 'PATCH';
     let payload = {};
     if (ed.kind === 'knowledge') {
-      url = `/api/knowledge-items/${encodeURIComponent(rec.id)}`;
-      payload = {
-        record_date: rec.record_date || null,
-        source_group: rec.source_group || 'Knowledge',
-        topic_model: rec.topic_model || rec.id,
-        category: rec.category || '',
-        key_takeaway: rec.key_takeaway || '',
-        core_concept_workflow: rec.core_concept_workflow || '',
-        why_question: rec.why_question || '',
-        actionable_application: rec.actionable_application || '',
-        note: rec.note || '',
-        status_code: rec.status_code || 'review',
-        component_tags: rec.component_tags || [],
-        custom_sections_json: rec.custom_sections_json || [],
-        drill_qa_json: rec.drill_qa_json || [],
-      };
+      url = `/api/knowledge-items/${encodeURIComponent(rec.id)}/inline`;
+      payload = ed.editLang === 'en'
+        ? { en_overrides_json: { [ed.field]: nextVal }, lang: 'en' }
+        : { [ed.field]: nextVal, lang: 'vi' };
     } else if (ed.kind === 'plc') {
-      url = `/api/plc-notes/${encodeURIComponent(rec.id)}`;
-      payload = {
-        record_date: rec.record_date || null,
-        plc_brand_platform: rec.plc_brand_platform || '',
-        category: rec.category || '',
-        title: rec.title || rec.id,
-        core_summary: rec.core_summary || '',
-        pinout_json: rec.pinout_json || [],
-        code_snippet: rec.code_snippet || '',
-        common_pitfalls: rec.common_pitfalls || '',
-        interview_qa: rec.interview_qa || '',
-        status_code: rec.status_code || 'review',
-        tags: rec.tags || [],
-        custom_sections_json: rec.custom_sections_json || [],
-        drill_qa_json: rec.drill_qa_json || [],
-      };
+      url = `/api/plc-notes/${encodeURIComponent(rec.id)}/inline`;
+      payload = ed.editLang === 'en'
+        ? { en_overrides_json: { [ed.field]: nextVal }, lang: 'en' }
+        : { [ed.field]: nextVal, lang: 'vi' };
     } else if (ed.kind === 'network') {
-      url = `/api/network-notes/${encodeURIComponent(rec.id)}`;
-      payload = {
-        record_date: rec.record_date || null,
-        protocol: rec.protocol || 'Modbus RTU/TCP',
-        target_device: rec.target_device || rec.id,
-        physical_wiring: rec.physical_wiring || '',
-        comm_settings: rec.comm_settings || '',
-        register_map_json: rec.register_map_json || [],
-        test_script_code: rec.test_script_code || '',
-        troubleshooting_tips: rec.troubleshooting_tips || '',
-        status_code: rec.status_code || 'review',
-        tags: rec.tags || [],
-        custom_sections_json: rec.custom_sections_json || [],
-        drill_qa_json: rec.drill_qa_json || [],
-      };
+      url = `/api/network-notes/${encodeURIComponent(rec.id)}/inline`;
+      payload = ed.editLang === 'en'
+        ? { en_overrides_json: { [ed.field]: nextVal }, lang: 'en' }
+        : { [ed.field]: nextVal, lang: 'vi' };
     } else if (ed.kind === 'english_card') {
       url = `/api/english/cards/${encodeURIComponent(rec.id)}`;
+      method = 'PUT';
       payload = {
         term: rec.term || rec.term_or_chunk || '',
         ipa: rec.ipa || '',
@@ -1490,7 +1713,7 @@ async function commitUniFieldEdit() {
     }
 
     const res = await fetch(url, {
-      method: 'PUT',
+      method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
@@ -1519,8 +1742,10 @@ async function commitUniFieldEdit() {
     showToast(isEn ? '✓ Saved' : '✓ Đã lưu', 'success');
   } catch (err) {
     rec[ed.field] = prevVal;
+    rec.en_overrides_json = prevEnOv;
     _uniRenderHostDisplay(ed.kind, rec, ed.field, ed.hostEl);
     if (ed.pane) ed.pane.scrollTop = savedScroll;
+    if (isEn && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
     showToast(err.message, 'error');
   }
 }

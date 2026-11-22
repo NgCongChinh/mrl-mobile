@@ -126,7 +126,7 @@ function buildPlcDetailHtml(p, opts = {}) {
             <span>${escapeHtml(p.record_date || '----------')}</span>
             ${ledHtml(p.status_code)}
           </div>
-          <div class="d-title ${inline ? 'uni-editable uni-editable-title' : ''}" ${inline ? `data-uni-edit="1" data-uni-kind="plc" data-uni-id="${escapeHtml(p.id)}" data-uni-field="title" onclick="startUniFieldEdit('plc', '${escapeHtml(p.id)}', 'title', event, { singleLine: true })"` : ''}>${escapeHtml(p.title)}</div>
+          <div class="d-title ${inline ? 'uni-editable uni-editable-title' : ''}" ${inline ? `data-uni-edit="1" data-uni-kind="plc" data-uni-id="${escapeHtml(p.id)}" data-uni-field="title" onclick="startUniFieldEdit('plc', '${escapeHtml(p.id)}', 'title', event, { singleLine: true })"` : ''} ${state.appLang === 'en' && p.en_overrides_json?.title ? 'data-has-custom-en="1" data-no-i18n="1"' : ''}>${escapeHtml(state.appLang === 'en' && p.en_overrides_json?.title ? p.en_overrides_json.title : p.title)}</div>
           <div class="tags">${renderTagChipsPlain(p.tags) || '<span class="mono" style="font-size:12px;color:var(--text-3);">CHƯA GẮN MÃ</span>'}</div>
         </div>
         <div class="d-controls">
@@ -281,7 +281,7 @@ function buildNetworkDetailHtml(n, opts = {}) {
             <span>${escapeHtml(n.record_date || '----------')}</span>
             ${ledHtml(n.status_code)}
           </div>
-          <div class="d-title ${inline ? 'uni-editable uni-editable-title' : ''}" ${inline ? `data-uni-edit="1" data-uni-kind="network" data-uni-id="${escapeHtml(n.id)}" data-uni-field="target_device" onclick="startUniFieldEdit('network', '${escapeHtml(n.id)}', 'target_device', event, { singleLine: true })"` : ''}>${escapeHtml(n.target_device)}</div>
+          <div class="d-title ${inline ? 'uni-editable uni-editable-title' : ''}" ${inline ? `data-uni-edit="1" data-uni-kind="network" data-uni-id="${escapeHtml(n.id)}" data-uni-field="target_device" onclick="startUniFieldEdit('network', '${escapeHtml(n.id)}', 'target_device', event, { singleLine: true })"` : ''} ${state.appLang === 'en' && n.en_overrides_json?.target_device ? 'data-has-custom-en="1" data-no-i18n="1"' : ''}>${escapeHtml(state.appLang === 'en' && n.en_overrides_json?.target_device ? n.en_overrides_json.target_device : n.target_device)}</div>
           <div class="tags">${renderTagChipsPlain(n.tags) || '<span class="mono" style="font-size:12px;color:var(--text-3);">CHƯA GẮN MÃ</span>'}</div>
         </div>
         <div class="d-controls">

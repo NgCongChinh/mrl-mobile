@@ -1,10 +1,10 @@
 {
   "ok": true,
-  "built_at": "2026-11-21 22:17:19",
-  "build_stamp": "20261121151719",
+  "built_at": "2026-11-22 11:34:53",
+  "build_stamp": "20261122043453",
   "dist_dir": "C:\\Users\\Admin\\MULTIVERSE_2026\\MRL\\mobile_dist",
   "files_count": 61,
-  "seed_records": 86,
+  "seed_records": 88,
   "seed_cards": 57,
-  "seed_size_kb": 411.6
+  "seed_size_kb": 431.9
 }

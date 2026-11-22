@@ -797,8 +797,12 @@ function buildFlashcardDeck(keepIndex = false) {
     const rec = _findRecordByKindId(fi.kind, fi.id);
     if (rec) targets.push({ kind: fi.kind, item: rec });
     if (scopeBadge) {
+      const isEnUi = state.appLang === 'en';
       scopeBadge.classList.remove('hidden');
-      scopeBadge.innerHTML = `ÔN RIÊNG: ${escapeHtml(fi.id)} <button type="button" onclick="clearFlashcardItemScope()" title="Quay lại ôn tất cả bài">×</button>`;
+      scopeBadge.setAttribute('data-no-i18n', '1');
+      scopeBadge.innerHTML = isEnUi
+        ? `FOCUSED: ${escapeHtml(fi.id)} <button type="button" onclick="clearFlashcardItemScope()" title="Back to all cards">×</button>`
+        : `ÔN RIÊNG: ${escapeHtml(fi.id)} <button type="button" onclick="clearFlashcardItemScope()" title="Quay lại ôn tất cả bài">×</button>`;
     }
   } else {
     if (scopeBadge) scopeBadge.classList.add('hidden');
@@ -1022,9 +1026,17 @@ async function evaluateCurrentFlashcard(preferAi = true) {
         mode: preferAi ? 'ai' : 'offline',
       }),
     });
-    const data = res.ok
-      ? await res.json()
-      : (window.MRLCoreStore?.evaluateFlashcardOffline?.(card.answerText, draft) || baseEv);
+    const rawTxt = await res.text().catch(() => '');
+    let parsedJson = null;
+    try { parsedJson = rawTxt ? JSON.parse(rawTxt) : null; } catch (_) { parsedJson = null; }
+    const data = res.ok && parsedJson
+      ? parsedJson
+      : {
+          ...(window.MRLCoreStore?.evaluateFlashcardOffline?.(card.answerText, draft) || baseEv),
+          ai_error: preferAi
+            ? (parsedJson?.ai_error || parsedJson?.detail || parsedJson?.error || `HTTP ${res.status}: ${rawTxt.slice(0, 180) || res.statusText || 'Lỗi máy chủ AI'}`)
+            : '',
+        };
     state.flashcard.evaluations[card.cardKey] = {
       ...data,
       evaluatedDraft: draft,
@@ -1041,15 +1053,17 @@ async function evaluateCurrentFlashcard(preferAi = true) {
       );
     }
   } catch (err) {
+    const errTxt = `Lỗi kết nối máy chủ AI: ${err?.message || 'Network error'}`;
     const fallback = window.MRLCoreStore?.evaluateFlashcardOffline?.(card.answerText, draft) || baseEv;
     state.flashcard.evaluations[card.cardKey] = {
       ...fallback,
+      ai_error: preferAi ? errTxt : '',
       evaluatedDraft: draft,
       loading: false,
       loadingAi: false,
     };
     if (preferAi) {
-      showToast(`AI fallback về Offline Rubric: ${err?.message || 'Lỗi kết nối máy chủ'}`, 'error');
+      showToast(`AI fallback về Offline Rubric: ${errTxt}`, 'error');
     }
   }
   renderFlashcardStage();
@@ -1201,24 +1215,33 @@ async function requestFlashcardFollowUp() {
         user_answer: draft,
       }),
     });
-    const data = res.ok
-      ? await res.json()
-      : (window.MRLCoreStore?.followUpFlashcardOffline?.(card.kind, card.title, card.question, card.answerText) || {});
+    const rawTxt = await res.text().catch(() => '');
+    let parsedJson = null;
+    try { parsedJson = rawTxt ? JSON.parse(rawTxt) : null; } catch (_) { parsedJson = null; }
+    const data = res.ok && parsedJson
+      ? parsedJson
+      : {
+          ...(window.MRLCoreStore?.followUpFlashcardOffline?.(card.kind, card.title, card.question, card.answerText) || {}),
+          ai_error: parsedJson?.ai_error || parsedJson?.detail || parsedJson?.error || `HTTP ${res.status}: ${rawTxt.slice(0, 180) || res.statusText || 'Lỗi máy chủ AI'}`,
+        };
     state.flashcard.followUps[card.cardKey] = {
       ...data,
       loading: false,
       showAnswer: false,
     };
-    if (data.engine !== 'gemini' && data.ai_error && state.hasGeminiKey) {
+    if (data.engine !== 'gemini' && data.ai_error) {
       showToast(`AI câu hỏi xoáy fallback Offline: ${data.ai_error}`, 'error');
     }
   } catch (err) {
+    const errTxt = `Lỗi kết nối máy chủ AI: ${err?.message || 'Network error'}`;
     const fb = window.MRLCoreStore?.followUpFlashcardOffline?.(card.kind, card.title, card.question, card.answerText) || {};
     state.flashcard.followUps[card.cardKey] = {
       ...fb,
+      ai_error: errTxt,
       loading: false,
       showAnswer: false,
     };
+    showToast(`AI câu hỏi xoáy fallback Offline: ${errTxt}`, 'error');
   }
   renderFlashcardStage();
 }
@@ -1293,6 +1316,10 @@ function _renderTechnicalGraderHtml(card, draftVal) {
        </div>`
     : '';
 
+  const aiFallbackBanner = (!isAi && activeEv.ai_error)
+    ? `<div class="mono" style="margin-top:6px;padding:6px 9px;border:1px solid var(--red);border-radius:var(--r);color:var(--red);background:color-mix(in srgb,var(--red) 8%,transparent);font-size:11.5px;line-height:1.45;">⚠ AI fallback Offline: ${escapeHtml(activeEv.ai_error)}</div>`
+    : '';
+
   return `
     <div class="fc-grader-card" data-no-i18n="1">
       <div class="fc-grader-head">
@@ -1310,6 +1337,7 @@ function _renderTechnicalGraderHtml(card, draftVal) {
           <button type="button" class="fc-auto-ai-pill ${autoAiOn ? 'on' : ''}" onclick="toggleFlashcardAutoAi()" title="Bật/tắt tự động chấm AI 2 tầng ngay khi lật thẻ">Tự chấm AI: ${autoAiOn ? 'BẬT' : 'TẮT'}</button>
         </div>
       </div>
+      ${aiFallbackBanner}
       <div class="fc-verdict">${escapeHtml(activeEv.verdict || '')}</div>
       ${rubricChipsHtml}
       ${blocksHtml}
@@ -1323,12 +1351,16 @@ function _renderFollowUpCardHtml(card) {
     return `<div class="fc-followup-card" data-no-i18n="1"><div class="fc-followup-q">⏳ Đang tạo câu hỏi xoáy nâng cao...</div></div>`;
   }
   const isAi = fu.engine === 'gemini';
+  const fuErrBanner = (!isAi && fu.ai_error)
+    ? `<div class="mono" style="margin:4px 0 6px;padding:5px 8px;border:1px solid var(--red);border-radius:var(--r);color:var(--red);background:color-mix(in srgb,var(--red) 8%,transparent);font-size:11.5px;line-height:1.4;">⚠ AI fallback Offline: ${escapeHtml(fu.ai_error)}</div>`
+    : '';
   return `
     <div class="fc-followup-card" data-no-i18n="1">
       <div class="fc-followup-head">
         <span class="fc-engine-badge ${isAi ? 'is-ai' : 'is-offline'}">${isAi ? '🤖 Phỏng vấn AI' : '🎯 Câu hỏi phản biện'}</span>
         ${fu.focus_tag ? `<span class="fc-kind-pill">${escapeHtml(fu.focus_tag)}</span>` : ''}
       </div>
+      ${fuErrBanner}
       <div class="fc-followup-q">${escapeHtml(fu.followup_question || '')}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button type="button" class="btn btn-sm" onclick="toggleFlashcardFollowUpAnswer()">${fu.showAnswer ? '▾ Ẩn gợi ý trả lời chuẩn' : '👁️ Xem gợi ý trả lời chuẩn'}</button>
@@ -1533,8 +1565,14 @@ function renderFlashcardStage() {
 
   let solidCount = 0;
   deck.forEach((c) => { if (state.reviewProgress?.[c.cardKey]?.rating === 'solid') solidCount += 1; });
-  document.getElementById('fc-progress-summary').innerHTML =
-    `CÂU HỎI <b style="color:var(--amber);">${deck.length}</b> · THUỘC <b style="color:var(--green);">${solidCount}/${deck.length}</b> · BÀI LÀM CHỦ <b style="color:var(--text-2);">${wsStat.mastered}/${wsStat.total}</b>`;
+  const isEnUi = state.appLang === 'en';
+  const sumEl = document.getElementById('fc-progress-summary');
+  if (sumEl) {
+    sumEl.setAttribute('data-no-i18n', '1');
+    sumEl.innerHTML = isEnUi
+      ? `QUESTIONS <b style="color:var(--amber);">${deck.length}</b> · SOLID <b style="color:var(--green);">${solidCount}/${deck.length}</b> · MASTERED <b style="color:var(--text-2);">${wsStat.mastered}/${wsStat.total}</b>`
+      : `CÂU HỎI <b style="color:var(--amber);">${deck.length}</b> · THUỘC <b style="color:var(--green);">${solidCount}/${deck.length}</b> · BÀI LÀM CHỦ <b style="color:var(--text-2);">${wsStat.mastered}/${wsStat.total}</b>`;
+  }
 
   const stage = document.getElementById('flashcard-stage');
   if (!deck.length) {
@@ -1726,9 +1764,13 @@ function renderFlashcardStage() {
       ? '<kbd>Space</kbd> lật thẻ · <kbd>←</kbd><kbd>→</kbd> chuyển'
       : '<kbd>Space</kbd> lật · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> chấm nhớ · <kbd>←</kbd><kbd>→</kbd> chuyển');
 
+  const fcBarLeftHtml = isEnUi
+    ? `CARD ${pad2(state.flashcard.index + 1)} / ${pad2(deck.length)}${recStats.total ? ` · PROGRESS ${escapeHtml(card.id)}: ${recStats.solid}/${recStats.total} SOLID` : ''}`
+    : `THẺ ${pad2(state.flashcard.index + 1)} / ${pad2(deck.length)}${recStats.total ? ` · TIẾN ĐỘ ${escapeHtml(card.id)}: ${recStats.solid}/${recStats.total} THUỘC` : ''}`;
+
   stage.innerHTML = `
     <div class="fc-bar">
-      <span>THẺ ${pad2(state.flashcard.index + 1)} / ${pad2(deck.length)}${recStats.total ? ` · TIẾN ĐỘ ${escapeHtml(card.id)}: ${recStats.solid}/${recStats.total} THUỘC` : ''}</span>
+      <span data-no-i18n="1">${fcBarLeftHtml}</span>
       <span>${kbdHint}</span>
     </div>
     <div class="fc-progress"><div style="width:${pct}%"></div></div>

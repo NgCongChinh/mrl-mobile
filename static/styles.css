@@ -866,9 +866,55 @@ html[data-theme="light"] .portal-stat-row b.portal-due-val { color: #EA580C; }
 }
 .sec-inline-edit-btn {
   padding: 2px 8px !important; font-size: 12px !important; line-height: 1.3 !important;
-  opacity: 0.78; flex: none;
+  opacity: 0.92; flex: none; display: inline-flex; align-items: center; gap: 3px;
 }
-.sec:hover .sec-inline-edit-btn, .sec-inline-edit-btn:focus { opacity: 1; border-color: var(--amber); color: var(--amber); }
+.sec:hover .sec-inline-edit-btn, .sec-inline-edit-btn:hover, .sec-inline-edit-btn:focus { opacity: 1; border-color: var(--amber); color: var(--amber); }
+
+.sec-head-ops {
+  display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: none;
+}
+
+.uni-inline-bar {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+  border-top: 1px dashed var(--line);
+}
+.uni-inline-bar-left,
+.uni-inline-bar-btns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.uni-inline-st {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--green);
+}
+.inline-lang-btn {
+  font-size: 11.5px !important;
+  padding: 2px 8px !important;
+  border-color: rgba(99, 102, 241, 0.45) !important;
+  color: #A5B4FC !important;
+  background: rgba(99, 102, 241, 0.1) !important;
+}
+.inline-lang-btn:hover {
+  border-color: #818CF8 !important;
+  background: rgba(99, 102, 241, 0.2) !important;
+}
+html[data-theme="light"] .inline-lang-btn {
+  border-color: #6366F1 !important;
+  color: #4338CA !important;
+  background: #EEF2FF !important;
+}
+html[data-theme="light"] .inline-lang-btn:hover {
+  background: #E0E7FF !important;
+}
 
 .inline-empty-prompt {
   border: 1px dashed var(--line-strong); border-radius: var(--r); padding: 14px 16px;
@@ -4025,4 +4071,270 @@ html[data-theme="light"] .tag-add-comp:hover {
 }
 html[data-theme="light"] .rep-form-details {
   background: #F8FAFC;
+}
+
+/* ==========================================================================
+   PART 2: FLAT 2-COLUMN CAPACITOR GRID IN COLD CHECK (NO SUB-HEADERS)
+   ========================================================================== */
+.cc-td-caps {
+  padding: 2px 6px !important;
+}
+.cc-cell-caps {
+  padding: 2px 0;
+}
+.cc-cap-grid {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+.cc-cap-row {
+  display: grid;
+  grid-template-columns: minmax(0, 38%) minmax(0, 1fr) 22px;
+  grid-template-areas: "spec meas del";
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px;
+  border-bottom: 1px solid var(--line);
+}
+.cc-cap-row.readonly {
+  grid-template-columns: minmax(0, 38%) minmax(0, 1fr);
+  grid-template-areas: "spec meas";
+}
+.cc-cap-row:last-child {
+  border-bottom: 0;
+}
+.cc-cap-spec-col {
+  grid-area: spec;
+  min-width: 0;
+}
+.cc-cap-meas-col {
+  grid-area: meas;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.cc-cap-inp {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12.5px;
+  padding: 3px 6px;
+  min-width: 0;
+  outline: none;
+  transition: border-color 0.14s ease, background-color 0.14s ease;
+}
+.cc-cap-inp:hover {
+  border-color: rgba(148, 163, 184, 0.28);
+  background: rgba(255, 255, 255, 0.03);
+}
+.cc-cap-inp:focus {
+  border-color: var(--amber);
+  background: rgba(15, 20, 25, 0.85);
+}
+.cc-cap-inp::placeholder {
+  color: var(--text-3);
+  opacity: 0.72;
+}
+.cc-cap-spec {
+  width: 100%;
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.cc-cap-val-group,
+.cc-cap-esr-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+}
+.cc-cap-val {
+  width: 68px;
+  text-align: right;
+  font-weight: 600;
+  color: #38BDF8;
+}
+.cc-cap-unit-btn {
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #7DD3FC;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1.3;
+  flex: none;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+.cc-cap-unit-btn:hover {
+  background: rgba(56, 189, 248, 0.22);
+  border-color: #38BDF8;
+}
+.cc-cap-sep {
+  color: var(--line-strong);
+  font-size: 12px;
+  user-select: none;
+  flex: none;
+}
+.cc-cap-esr-lbl,
+.cc-cap-ohm {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+  user-select: none;
+  flex: none;
+}
+.cc-cap-esr {
+  width: 62px;
+  text-align: right;
+  color: var(--amber);
+  font-weight: 600;
+}
+.cc-cap-note {
+  flex: 1 1 70px;
+  min-width: 70px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.cc-cap-note:focus {
+  color: var(--text);
+}
+.cc-cap-del-btn {
+  grid-area: del;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.48;
+  transition: opacity 0.12s ease, color 0.12s ease, background-color 0.12s ease;
+}
+.cc-cap-row:hover .cc-cap-del-btn,
+.cc-cap-del-btn:focus {
+  opacity: 0.95;
+}
+.cc-cap-del-btn:hover {
+  color: var(--red);
+  background: rgba(239, 68, 68, 0.12);
+}
+.cc-cap-foot {
+  padding: 4px 2px 2px;
+}
+.cc-cap-add-btn {
+  background: transparent;
+  border: 1px dashed rgba(148, 163, 184, 0.35);
+  color: var(--text-3);
+  border-radius: 4px;
+  padding: 2px 9px;
+  font-size: 11.5px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, background-color 0.12s ease;
+}
+.cc-cap-add-btn:hover {
+  border-color: var(--amber);
+  color: var(--amber);
+  background: rgba(245, 158, 11, 0.08);
+}
+.cc-cap-spec-txt {
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--text);
+}
+.cc-cap-val-txt {
+  font-size: 12px;
+  font-weight: 600;
+  color: #38BDF8;
+}
+.cc-cap-esr-txt {
+  font-size: 12px;
+  color: var(--amber);
+}
+.cc-cap-note-txt {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-left: 4px;
+}
+
+/* Modal Capacitor Grid */
+.rep-modal-cc-row.has-caps {
+  grid-template-columns: 1fr auto auto !important;
+}
+.rep-modal-cc-row.has-caps .rep-cc-item-inp {
+  grid-column: 1 / 2;
+}
+.rep-modal-cc-row.has-caps .rep-modal-cap-wrap {
+  grid-column: 1 / -1;
+  order: 5;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--line);
+}
+.rep-modal-cap-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 5px;
+}
+.rep-modal-cap-row {
+  display: grid;
+  grid-template-columns: minmax(0, 38%) minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+}
+.rep-modal-cap-row .cc-cap-meas-col {
+  gap: 5px;
+}
+
+/* Light Mode Overrides for Capacitor Grid */
+html[data-theme="light"] .cc-cap-row {
+  border-bottom-color: #E2E8F0;
+}
+html[data-theme="light"] .cc-cap-inp:hover {
+  border-color: #CBD5E1;
+  background: #F8FAFC;
+}
+html[data-theme="light"] .cc-cap-inp:focus {
+  border-color: #D97706;
+  background: #FFFFFF;
+}
+html[data-theme="light"] .cc-cap-val {
+  color: #0284C7;
+}
+html[data-theme="light"] .cc-cap-val-txt {
+  color: #0284C7;
+}
+html[data-theme="light"] .cc-cap-unit-btn {
+  background: #E0F2FE;
+  border-color: #7DD3FC;
+  color: #0369A1;
+}
+html[data-theme="light"] .cc-cap-unit-btn:hover {
+  background: #BAE6FD;
+  border-color: #0284C7;
+}
+html[data-theme="light"] .cc-cap-esr,
+html[data-theme="light"] .cc-cap-esr-txt {
+  color: #B45309;
+}
+html[data-theme="light"] .cc-cap-add-btn {
+  border-color: #CBD5E1;
+  color: #475569;
+}
+html[data-theme="light"] .cc-cap-add-btn:hover {
+  border-color: #D97706;
+  color: #B45309;
+  background: #FFFBEB;
 }

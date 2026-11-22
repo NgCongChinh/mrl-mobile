@@ -85,6 +85,72 @@ function _modalColdStatusMeta(status) {
   return { code: 'none', label: '—', next: 'ok', cls: 'cc-st-badge-none' };
 }
 
+function _modalRenderCapItemHtml(cap = {}, isEn = false) {
+  const unit = window.MRLCoreStore?.normalizeCapUnit ? window.MRLCoreStore.normalizeCapUnit(cap.cap_unit || 'µF') : (cap.cap_unit || 'µF');
+  return `
+    <div class="rep-modal-cap-row" data-cap-id="${escapeHtml(cap.id || '')}">
+      <input type="text" class="inp cc-cap-spec modal-cap-spec" spellcheck="false" placeholder="${isEn ? 'e.g. 470µF/50V' : 'VD: 470µF/50V'}" value="${escapeHtml(cap.spec || '')}" />
+      <div class="cc-cap-meas-col">
+        <div class="cc-cap-val-group">
+          <input type="text" class="inp cc-cap-val modal-cap-val mono" spellcheck="false" placeholder="${isEn ? 'Meas' : 'Đo'}" value="${escapeHtml(cap.cap_val || '')}" />
+          <button type="button" class="cc-cap-unit-btn modal-cap-unit" tabindex="-1" data-cap-unit="${escapeHtml(unit)}" data-no-i18n="1" onclick="cycleModalCapUnit(this)">${escapeHtml(unit)}</button>
+        </div>
+        <span class="cc-cap-sep">|</span>
+        <div class="cc-cap-esr-group">
+          <span class="cc-cap-esr-lbl">ESR</span>
+          <input type="text" class="inp cc-cap-esr modal-cap-esr mono" spellcheck="false" placeholder="0.00" value="${escapeHtml(cap.esr_val || '')}" />
+          <span class="cc-cap-ohm">Ω</span>
+        </div>
+        <input type="text" class="inp cc-cap-note modal-cap-note" spellcheck="false" placeholder="${isEn ? 'note...' : 'ghi chú...'}" value="${escapeHtml(cap.note || '')}" />
+        <button type="button" class="cc-cap-del-btn" tabindex="-1" onclick="this.closest('.rep-modal-cap-row').remove()" title="${isEn ? 'Remove cap' : 'Xóa tụ'}">×</button>
+      </div>
+    </div>`;
+}
+
+function addModalCapSubRow(btn, focusSpec = true) {
+  const wrap = btn?.closest('.rep-modal-cap-wrap')?.querySelector('.rep-modal-cap-list');
+  if (!wrap) return;
+  const isEn = typeof state !== 'undefined' && state.appLang === 'en';
+  const tmp = document.createElement('div');
+  tmp.innerHTML = _modalRenderCapItemHtml({ id: `cap-${wrap.children.length + 1}`, cap_unit: 'µF' }, isEn).trim();
+  const el = tmp.firstElementChild;
+  if (!el) return;
+  wrap.appendChild(el);
+  if (focusSpec) el.querySelector('.modal-cap-spec')?.focus();
+}
+
+function cycleModalCapUnit(btn) {
+  const units = ['µF', 'mF', 'nF'];
+  const cur = String(btn?.dataset?.capUnit || btn?.textContent || 'µF').trim();
+  const next = units[(Math.max(0, units.indexOf(cur)) + 1) % units.length];
+  if (btn) {
+    btn.dataset.capUnit = next;
+    btn.textContent = next;
+  }
+}
+
+function _maybeUpgradeModalRowToCaps(rowEl) {
+  if (!rowEl || rowEl.querySelector('.rep-modal-cap-wrap')) return;
+  const itemVal = String(rowEl.querySelector('.rep-cc-item-inp')?.value || '').trim();
+  const isCap = window.MRLCoreStore?.isCapacitorColdRow
+    ? window.MRLCoreStore.isCapacitorColdRow(itemVal)
+    : /tụ|capacitor|\bcap\b|\besr\b/i.test(itemVal);
+  if (!isCap) return;
+  const ta = rowEl.querySelector('.rep-cc-res-inp');
+  const rawRes = ta ? ta.value : '';
+  const caps = (rawRes && window.MRLCoreStore?.parseCapacitorLines)
+    ? window.MRLCoreStore.parseCapacitorLines(rawRes)
+    : [];
+  const isEn = typeof state !== 'undefined' && state.appLang === 'en';
+  const capWrap = document.createElement('div');
+  capWrap.className = 'rep-modal-cap-wrap';
+  capWrap.setAttribute('data-no-i18n', '1');
+  capWrap.innerHTML = `
+    <div class="rep-modal-cap-list">${(caps.length ? caps : [{ id: 'cap-1', cap_unit: 'µF' }]).map((c) => _modalRenderCapItemHtml(c, isEn)).join('')}</div>
+    <button type="button" class="cc-cap-add-btn" onclick="addModalCapSubRow(this, true)">${isEn ? '+ Add cap' : '+ Thêm tụ'}</button>`;
+  if (ta) ta.replaceWith(capWrap);
+}
+
 function addModalColdCheckRow(rowData = { id: '', item: '', result: '', status: 'none' }, focusField = null) {
   const container = document.getElementById('rep-form-cold-container');
   if (!container) return null;
@@ -93,25 +159,44 @@ function addModalColdCheckRow(rowData = { id: '', item: '', result: '', status: 
     ? String(rowData.status)
     : 'none';
   const meta = _modalColdStatusMeta(st);
+  const isCap = window.MRLCoreStore?.isCapacitorColdRow
+    ? window.MRLCoreStore.isCapacitorColdRow(rowData?.item, rowData?.caps)
+    : ((Array.isArray(rowData?.caps) && rowData.caps.length > 0) || /tụ|capacitor|\bcap\b|\besr\b/i.test(String(rowData?.item || '')));
+
+  let resHtml = `<textarea class="inp rep-cc-res-inp" rows="1" spellcheck="false" placeholder="${isEn ? 'Measurement / Result...' : 'Thông số đo / Kết quả...'}">${escapeHtml(rowData?.result || '')}</textarea>`;
+  if (isCap) {
+    const caps = Array.isArray(rowData?.caps)
+      ? rowData.caps
+      : ((rowData?.result && window.MRLCoreStore?.parseCapacitorLines) ? window.MRLCoreStore.parseCapacitorLines(rowData.result) : []);
+    resHtml = `
+      <div class="rep-modal-cap-wrap" data-no-i18n="1">
+        <div class="rep-modal-cap-list">${caps.map((cap) => _modalRenderCapItemHtml(cap, isEn)).join('')}</div>
+        <button type="button" class="cc-cap-add-btn" onclick="addModalCapSubRow(this, true)">${isEn ? '+ Add cap' : '+ Thêm tụ'}</button>
+      </div>`;
+  }
 
   const row = document.createElement('div');
-  row.className = `rep-modal-cc-row cc-st-${st}`;
+  row.className = `rep-modal-cc-row cc-st-${st} ${isCap ? 'has-caps' : ''}`;
   row.dataset.ccId = rowData?.id || '';
   row.dataset.ccStatus = st;
   row.innerHTML = `
     <input type="text" class="inp rep-cc-item-inp" spellcheck="false" placeholder="${isEn ? 'Component (e.g. Cap, Opto)...' : 'Thành phần (VD: Tụ lọc, Opto)...'}" value="${escapeHtml(rowData?.item || '')}" />
-    <textarea class="inp rep-cc-res-inp" rows="1" spellcheck="false" placeholder="${isEn ? 'Measurement / Result...' : 'Thông số đo / Kết quả...'}">${escapeHtml(rowData?.result || '')}</textarea>
+    ${resHtml}
     <button type="button" class="cc-status-btn ${meta.cls}" data-no-i18n="1" onclick="cycleModalColdCheckStatus(this)" title="${isEn ? 'Click to cycle status' : 'Chạm để đổi trạng thái'}">${escapeHtml(meta.label)}</button>
     <button type="button" class="cc-del-btn modal-cc-del" onclick="this.closest('.rep-modal-cc-row').remove()" title="${isEn ? 'Delete row' : 'Xóa dòng'}" aria-label="${isEn ? 'Delete row' : 'Xóa dòng'}">×</button>`;
   container.appendChild(row);
 
+  const itemInp = row.querySelector('.rep-cc-item-inp');
+  if (itemInp) {
+    itemInp.addEventListener('blur', () => _maybeUpgradeModalRowToCaps(row));
+  }
   const ta = row.querySelector('.rep-cc-res-inp');
   if (ta && typeof _autoResizeRepairTextarea === 'function') {
     _autoResizeRepairTextarea(ta, 34);
     ta.addEventListener('input', () => _autoResizeRepairTextarea(ta, 34));
   }
-  if (focusField === 'item') row.querySelector('.rep-cc-item-inp')?.focus();
-  else if (focusField === 'result') ta?.focus();
+  if (focusField === 'item') itemInp?.focus();
+  else if (focusField === 'result') (ta || row.querySelector('.modal-cap-spec'))?.focus();
   return row;
 }
 
@@ -132,10 +217,34 @@ function collectModalColdCheckRows() {
   const rows = [];
   document.querySelectorAll('#rep-form-cold-container .rep-modal-cc-row').forEach((row) => {
     const item = String(row.querySelector('.rep-cc-item-inp')?.value || '').trim();
-    const result = String(row.querySelector('.rep-cc-res-inp')?.value || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
     const status = row.dataset.ccStatus || 'none';
-    if (!item && !result) return;
     const rawId = String(row.dataset.ccId || '').trim();
+    const capWrap = row.querySelector('.rep-modal-cap-wrap');
+    if (capWrap) {
+      const caps = [];
+      capWrap.querySelectorAll('.rep-modal-cap-row').forEach((cr) => {
+        const spec = String(cr.querySelector('.modal-cap-spec')?.value || '').trim();
+        const capVal = String(cr.querySelector('.modal-cap-val')?.value || '').trim();
+        const capUnit = String(cr.querySelector('.modal-cap-unit')?.dataset?.capUnit || 'µF').trim() || 'µF';
+        const esrVal = String(cr.querySelector('.modal-cap-esr')?.value || '').trim();
+        const note = String(cr.querySelector('.modal-cap-note')?.value || '').trim();
+        if (!spec && !capVal && !esrVal && !note) return;
+        caps.push({ id: `cap-${caps.length + 1}`, spec, cap_val: capVal, cap_unit: capUnit, esr_val: esrVal, note });
+      });
+      const result = window.MRLCoreStore?.serializeCapsToResult ? window.MRLCoreStore.serializeCapsToResult(caps) : '';
+      if (!item && !caps.length) return;
+      rows.push({
+        id: rawId || `cc-${rows.length + 1}`,
+        item,
+        result,
+        caps,
+        status: ['none', 'ok', 'suspect', 'fault'].includes(status) ? status : 'none',
+      });
+      return;
+    }
+
+    const result = String(row.querySelector('.rep-cc-res-inp')?.value || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+    if (!item && !result) return;
     rows.push({
       id: rawId || `cc-${rows.length + 1}`,
       item,

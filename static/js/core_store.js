@@ -636,11 +636,72 @@
   // AI Config & Gemini/Vertex Client (Direct Browser Offline Fallback)
   // -------------------------------------------------------------------------
   const GEMINI_FALLBACK_MODELS = [
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
     'gemini-3.5-flash-lite',
     'gemini-flash-lite-latest',
     'gemini-3.1-flash-lite',
     'gemini-3.8-flash',
   ];
+  const _AQ_ENDPOINT_CACHE_MAP = new Map();
+  const _AQ_SESSION_STORAGE_KEY = 'mrl_aq_endpoint_cache_v1';
+
+  function _sanitizeGeminiKeyJS(rawKey) {
+    return String(rawKey || '').replace(/[\s\r\n]+/g, '');
+  }
+
+  function _validateGeminiKeyJS(key) {
+    const low = String(key || '').toLowerCase();
+    if (/^(ghp_|github_pat_|gho_|ghs_|ghu_)/.test(low)) {
+      return 'HTTP 400: Bạn đang dán nhầm GitHub Token (ghp_/github_pat_...) vào ô Gemini API Key. Vui lòng lấy đúng khóa AIzaSy... hoặc AQ.... tại aistudio.google.com/api-keys.';
+    }
+    return '';
+  }
+
+  function _aqKeySig(key) {
+    const s = String(key || '');
+    return `${s.slice(0, 8)}:${s.slice(-4)}:${s.length}`;
+  }
+
+  function _getCachedAqEndpointIdx(key) {
+    const sig = _aqKeySig(key);
+    if (_AQ_ENDPOINT_CACHE_MAP.has(sig)) return _AQ_ENDPOINT_CACHE_MAP.get(sig);
+    try {
+      const raw = sessionStorage.getItem(_AQ_SESSION_STORAGE_KEY);
+      if (raw) {
+        const obj = JSON.parse(raw);
+        if (obj && typeof obj[sig] === 'number') {
+          _AQ_ENDPOINT_CACHE_MAP.set(sig, obj[sig]);
+          return obj[sig];
+        }
+      }
+    } catch (_) { /* ignore */ }
+    return null;
+  }
+
+  function _setCachedAqEndpointIdx(key, epIdx) {
+    const sig = _aqKeySig(key);
+    _AQ_ENDPOINT_CACHE_MAP.set(sig, epIdx);
+    try {
+      const raw = sessionStorage.getItem(_AQ_SESSION_STORAGE_KEY);
+      const obj = raw ? JSON.parse(raw) : {};
+      obj[sig] = epIdx;
+      sessionStorage.setItem(_AQ_SESSION_STORAGE_KEY, JSON.stringify(obj));
+    } catch (_) { /* ignore */ }
+  }
+
+  function _clearCachedAqEndpointIdx(key) {
+    const sig = _aqKeySig(key);
+    _AQ_ENDPOINT_CACHE_MAP.delete(sig);
+    try {
+      const raw = sessionStorage.getItem(_AQ_SESSION_STORAGE_KEY);
+      if (raw) {
+        const obj = JSON.parse(raw);
+        delete obj[sig];
+        sessionStorage.setItem(_AQ_SESSION_STORAGE_KEY, JSON.stringify(obj));
+      }
+    } catch (_) { /* ignore */ }
+  }
 
   function getAiConfig() {
     try {
@@ -649,8 +710,8 @@
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === 'object') {
           return {
-            gemini_api_key: String(parsed.gemini_api_key || ''),
-            gemini_model: String(parsed.gemini_model || 'gemini-3.5-flash-lite') || 'gemini-3.5-flash-lite',
+            gemini_api_key: _sanitizeGeminiKeyJS(parsed.gemini_api_key || ''),
+            gemini_model: String(parsed.gemini_model || 'gemini-3.5-flash-lite').trim() || 'gemini-3.5-flash-lite',
           };
         }
       }
@@ -660,8 +721,10 @@
 
   function saveAiConfig(key, model) {
     const prev = getAiConfig();
-    const nextKey = key === '__KEEP__' ? (prev.gemini_api_key || '') : String(key || '').trim();
+    const rawTrim = String(key || '').trim();
+    const nextKey = rawTrim === '__KEEP__' ? _sanitizeGeminiKeyJS(prev.gemini_api_key || '') : _sanitizeGeminiKeyJS(rawTrim);
     const nextModel = String(model || prev.gemini_model || 'gemini-3.5-flash-lite').trim() || 'gemini-3.5-flash-lite';
+    if (rawTrim !== '__KEEP__' && nextKey) _clearCachedAqEndpointIdx(nextKey);
     try { localStorage.setItem(AI_CFG_KEY, JSON.stringify({ gemini_api_key: nextKey, gemini_model: nextModel })); } catch (_) {}
     return { gemini_api_key: nextKey, gemini_model: nextModel };
   }
@@ -675,11 +738,12 @@
       detail = '';
     }
     if (!detail) detail = String(rawText || '').replace(/\s+/g, ' ').trim();
-    detail = detail.slice(0, 240);
-    if (status === 429) return detail ? `HTTP 429: Quá giới hạn miễn phí (${detail})` : 'HTTP 429: Quá giới hạn miễn phí';
-    if (status === 404) return detail ? `HTTP 404: Model not found (${detail})` : 'HTTP 404: Model not found';
-    if (status === 503) return detail ? `HTTP 503: Model đang quá tải tạm thời (${detail})` : 'HTTP 503: Model đang quá tải tạm thời';
-    return detail ? `HTTP ${status}: ${detail}` : `HTTP ${status}`;
+    detail = detail.slice(0, 260);
+    if (detail) return `HTTP ${status}: ${detail}`;
+    if (status === 429) return 'HTTP 429: Quá giới hạn miễn phí';
+    if (status === 404) return 'HTTP 404: Model not found';
+    if (status === 503) return 'HTTP 503: Model đang quá tải tạm thời';
+    return `HTTP ${status}`;
   }
 
   function _extractJsonBlockJS(rawText) {
@@ -698,12 +762,55 @@
     return null;
   }
 
+  function _buildGeminiEndpointsJS(encModel, key) {
+    if (key.startsWith('AQ.')) {
+      const qKey = encodeURIComponent(key);
+      return [
+        {
+          idx: 0,
+          name: 'Vertex AI v1',
+          url: `https://aiplatform.googleapis.com/v1/publishers/google/models/${encModel}:generateContent?key=${qKey}`,
+          headers: { 'Content-Type': 'application/json' },
+        },
+        {
+          idx: 1,
+          name: 'Vertex AI v1beta1',
+          url: `https://aiplatform.googleapis.com/v1beta1/publishers/google/models/${encModel}:generateContent?key=${qKey}`,
+          headers: { 'Content-Type': 'application/json' },
+        },
+        {
+          idx: 2,
+          name: 'AI Studio (Header)',
+          url: `https://generativelanguage.googleapis.com/v1beta/models/${encModel}:generateContent`,
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        },
+        {
+          idx: 3,
+          name: 'AI Studio (?key=)',
+          url: `https://generativelanguage.googleapis.com/v1beta/models/${encModel}:generateContent?key=${qKey}`,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ];
+    }
+    return [
+      {
+        idx: 2,
+        name: 'AI Studio (Header)',
+        url: `https://generativelanguage.googleapis.com/v1beta/models/${encModel}:generateContent`,
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+      },
+    ];
+  }
+
   async function _callGeminiJsonDetailedDirect(promptText, overrideKey = '', overrideModel = '') {
     const cfg = getAiConfig();
-    const rawOv = String(overrideKey || '').trim();
-    const key = (rawOv && rawOv !== '__KEEP__') ? rawOv : String(cfg.gemini_api_key || '').trim();
+    const rawTrim = String(overrideKey || '').trim();
+    const rawOv = rawTrim === '__KEEP__' ? '__KEEP__' : _sanitizeGeminiKeyJS(rawTrim);
+    const key = (rawOv && rawOv !== '__KEEP__') ? rawOv : _sanitizeGeminiKeyJS(cfg.gemini_api_key || '');
     const reqModel = String(overrideModel || cfg.gemini_model || 'gemini-3.5-flash-lite').trim() || 'gemini-3.5-flash-lite';
     if (!key) return { data: null, error: 'Chưa cấu hình Gemini API Key', model: reqModel, endpoint: '', http_status: 0 };
+    const badMsg = _validateGeminiKeyJS(key);
+    if (badMsg) return { data: null, error: badMsg, model: reqModel, endpoint: '', http_status: 400 };
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       return { data: null, error: 'Thiết bị đang ngoại tuyến (Mất kết nối mạng)', model: reqModel, endpoint: '', http_status: 0 };
     }
@@ -712,94 +819,114 @@
       contents: [{ role: 'user', parts: [{ text: promptText }] }],
       generationConfig: { temperature: 0.35, responseMimeType: 'application/json' },
     });
-    const stdHeaders = { 'Content-Type': 'application/json', 'x-goog-api-key': key };
     const modelsToTry = [reqModel, ...GEMINI_FALLBACK_MODELS.filter((m) => m !== reqModel)];
+    const isAq = key.startsWith('AQ.');
+    const cachedEpIdx = isAq ? _getCachedAqEndpointIdx(key) : null;
 
     let lastError = '';
     let lastStatus = 0;
-    let lastEp = 'Google AI Studio';
+    let lastEp = isAq ? 'Vertex AI v1' : 'AI Studio (Header)';
+    let fallbackError = '';
+    let fallbackStatus = 0;
+    let fallbackEp = lastEp;
     let timeoutRetried = false;
+    const disabledEpIndices = new Set();
 
     for (let idx = 0; idx < modelsToTry.length;) {
       const mName = modelsToTry[idx];
       idx += 1;
       const encModel = encodeURIComponent(mName);
-      const glaUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encModel}:generateContent`;
-      lastEp = 'Google AI Studio';
+      const endpoints = _buildGeminiEndpointsJS(encModel, key);
+      if (isAq && cachedEpIdx !== null) {
+        endpoints.sort((a, b) => ((a.idx === cachedEpIdx ? 0 : 1) - (b.idx === cachedEpIdx ? 0 : 1)) || (a.idx - b.idx));
+      }
 
-      const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      const timer = ctrl ? setTimeout(() => { try { ctrl.abort(); } catch (_) {} }, 18000) : null;
-      try {
-        const fetchOpts = { method: 'POST', headers: stdHeaders, body: payloadBody };
-        if (ctrl) fetchOpts.signal = ctrl.signal;
-        const res = await _nativeFetch(glaUrl, fetchOpts);
-        if (res.ok) {
-          const json = await res.json();
-          const parts = json?.candidates?.[0]?.content?.parts || [];
-          const txt = parts.map((p) => String(p?.text || '')).join('');
-          const parsed = _extractJsonBlockJS(txt);
-          if (parsed !== null) {
-            return { data: parsed, error: '', model: mName, endpoint: 'Google AI Studio', http_status: 200 };
-          }
-          return { data: null, error: 'HTTP 200: AI trả về dữ liệu không đúng định dạng JSON', model: mName, endpoint: 'Google AI Studio', http_status: 200 };
-        }
+      let sawModelFallbackHttp = false;
+      for (let ei = 0; ei < endpoints.length; ei++) {
+        const ep = endpoints[ei];
+        if (disabledEpIndices.has(ep.idx)) continue;
+        lastEp = ep.name;
 
-        const errRaw = await res.text().catch(() => '');
-        lastError = _formatGeminiHttpErrorJS(res.status, errRaw);
-        lastStatus = res.status;
-        if (res.status === 404 || res.status === 503) continue;
-
-        if ((res.status === 400 || res.status === 401 || res.status === 403) && key.startsWith('AQ.')) {
-          const vUrl = `https://aiplatform.googleapis.com/v1/publishers/google/models/${encModel}:generateContent`;
-          const vCtrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-          const vTimer = vCtrl ? setTimeout(() => { try { vCtrl.abort(); } catch (_) {} }, 15000) : null;
-          try {
-            const vOpts = { method: 'POST', headers: stdHeaders, body: payloadBody };
-            if (vCtrl) vOpts.signal = vCtrl.signal;
-            const vRes = await _nativeFetch(vUrl, vOpts);
-            if (vRes.ok) {
-              const vJson = await vRes.json();
-              const vParts = vJson?.candidates?.[0]?.content?.parts || [];
-              const vTxt = vParts.map((p) => String(p?.text || '')).join('');
-              const vParsed = _extractJsonBlockJS(vTxt);
-              if (vParsed !== null) {
-                return { data: vParsed, error: '', model: mName, endpoint: 'Vertex AI Express', http_status: 200 };
-              }
-              return { data: null, error: 'HTTP 200: Vertex AI trả về dữ liệu không đúng định dạng JSON', model: mName, endpoint: 'Vertex AI Express', http_status: 200 };
+        const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timer = ctrl ? setTimeout(() => { try { ctrl.abort(); } catch (_) {} }, 18000) : null;
+        try {
+          const fetchOpts = { method: 'POST', headers: ep.headers, body: payloadBody };
+          if (ctrl) fetchOpts.signal = ctrl.signal;
+          const res = await _nativeFetch(ep.url, fetchOpts);
+          if (res.ok) {
+            const json = await res.json();
+            const parts = json?.candidates?.[0]?.content?.parts || [];
+            const txt = parts.map((p) => String(p?.text || '')).join('');
+            const parsed = _extractJsonBlockJS(txt);
+            if (isAq) _setCachedAqEndpointIdx(key, ep.idx);
+            if (parsed !== null) {
+              return { data: parsed, error: '', model: mName, endpoint: ep.name, http_status: 200 };
             }
-            const vErrRaw = await vRes.text().catch(() => '');
-            const lowV = vErrRaw.toLowerCase();
-            if (!lowV.includes('has not been used in project') && !lowV.includes('is disabled')) {
-              lastError = _formatGeminiHttpErrorJS(vRes.status, vErrRaw);
-              lastStatus = vRes.status;
-              lastEp = 'Vertex AI Express';
-            }
-          } catch (_) { /* ignore Vertex fallback failure */ } finally {
-            if (vTimer !== null) clearTimeout(vTimer);
+            return { data: null, error: 'HTTP 200: AI trả về dữ liệu không đúng định dạng JSON', model: mName, endpoint: ep.name, http_status: 200 };
           }
-          return { data: null, error: lastError, model: mName, endpoint: lastEp, http_status: lastStatus };
-        }
 
-        return { data: null, error: lastError, model: mName, endpoint: lastEp, http_status: lastStatus };
-      } catch (err) {
-        if (err && err.name === 'AbortError') {
-          lastError = `HTTP 504: Timeout (18s) khi gọi model ${mName}`;
-          lastStatus = 504;
-          const liteIdx = modelsToTry.indexOf('gemini-3.5-flash-lite');
-          if (!timeoutRetried && liteIdx >= idx) {
-            timeoutRetried = true;
-            idx = liteIdx;
+          const errRaw = await res.text().catch(() => '');
+          const epErr = _formatGeminiHttpErrorJS(res.status, errRaw);
+          const lowRaw = errRaw.toLowerCase();
+          const isDisabledEp = isAq && (ep.idx === 0 || ep.idx === 1) && (lowRaw.includes('has not been used in project') || lowRaw.includes('is disabled'));
+          if (isDisabledEp) {
+            disabledEpIndices.add(ep.idx);
+            if (!fallbackError) {
+              fallbackError = epErr;
+              fallbackStatus = res.status;
+              fallbackEp = ep.name;
+            }
+            if (ep.idx === cachedEpIdx) _clearCachedAqEndpointIdx(key);
             continue;
           }
-          return { data: null, error: lastError, model: mName, endpoint: lastEp, http_status: 504 };
+
+          lastError = epErr;
+          lastStatus = res.status;
+          lastEp = ep.name;
+          if (res.status === 404 || res.status === 503) {
+            sawModelFallbackHttp = true;
+            continue;
+          }
+          if (isAq && (res.status === 400 || res.status === 401 || res.status === 403)) {
+            if (ep.idx === cachedEpIdx) _clearCachedAqEndpointIdx(key);
+            continue;
+          }
+          return { data: null, error: lastError, model: mName, endpoint: lastEp, http_status: lastStatus };
+        } catch (err) {
+          if (err && err.name === 'AbortError') {
+            lastError = `HTTP 504: Timeout (18s) khi gọi model ${mName} (${ep.name})`;
+            lastStatus = 504;
+            lastEp = ep.name;
+            if (isAq && ei < endpoints.length - 1) continue;
+            const liteIdx = modelsToTry.indexOf('gemini-3.5-flash-lite');
+            if (!timeoutRetried && liteIdx >= idx) {
+              timeoutRetried = true;
+              idx = liteIdx;
+              sawModelFallbackHttp = true;
+              break;
+            }
+            return { data: null, error: lastError, model: mName, endpoint: lastEp, http_status: 504 };
+          }
+          lastError = `Lỗi kết nối mạng tới ${ep.name} (${err?.message || 'Network/CORS error'})`;
+          lastStatus = 0;
+          lastEp = ep.name;
+          if (isAq && ei < endpoints.length - 1) continue;
+          return { data: null, error: lastError, model: mName, endpoint: lastEp, http_status: 0 };
+        } finally {
+          if (timer !== null) clearTimeout(timer);
         }
-        return { data: null, error: `Lỗi kết nối mạng tới máy chủ AI (${err?.message || 'Network error'})`, model: mName, endpoint: lastEp, http_status: 0 };
-      } finally {
-        if (timer !== null) clearTimeout(timer);
+      }
+
+      if (!sawModelFallbackHttp) {
+        if (lastError) return { data: null, error: lastError, model: mName, endpoint: lastEp, http_status: lastStatus };
+        if (fallbackError) return { data: null, error: fallbackError, model: mName, endpoint: fallbackEp, http_status: fallbackStatus };
       }
     }
 
-    return { data: null, error: lastError || 'Không thể kết nối AI', model: modelsToTry[modelsToTry.length - 1], endpoint: lastEp, http_status: lastStatus };
+    const finalErr = lastError || fallbackError || 'Không thể kết nối AI';
+    const finalStatus = lastStatus || fallbackStatus;
+    const finalEp = lastError ? lastEp : fallbackEp;
+    return { data: null, error: finalErr, model: modelsToTry[modelsToTry.length - 1], endpoint: finalEp, http_status: finalStatus };
   }
 
   async function _callGeminiJsonDirect(promptText, overrideKey = '', errBox = null, overrideModel = '') {
@@ -1689,6 +1816,144 @@
     return [clean, ''];
   }
 
+  const CAPACITOR_ROW_RE_JS = /tụ|capacitor|\bcap\b|\besr\b/i;
+  const CAP_UNITS_JS = ['µF', 'mF', 'nF'];
+  const _CAP_VAL_RE_JS = /(\d+(?:[.,]\d+)?(?:\s*[-–~]\s*\d+(?:[.,]\d+)?)?)\s*(uF|µF|μF|mF|nF|pF)(?![A-Za-z0-9_])/gi;
+  const _CAP_EXPLICIT_ESR_RE_JS = /(?:\bESR\b|\bR_?ESR\b)\s*[:=]?\s*(\d+(?:[.,]\d+)?(?:\s*[-–~]\s*\d+(?:[.,]\d+)?)?)\s*(?:m?Ω|ohm|ω)?(?![A-Za-z0-9_])/gi;
+  const _CAP_OHM_RE_JS = /(\d+(?:[.,]\d+)?(?:\s*[-–~]\s*\d+(?:[.,]\d+)?)?)\s*(?:Ω|ohm|ω)(?![A-Za-z0-9_])/gi;
+
+  function isCapacitorColdRow(item, caps = null) {
+    if (Array.isArray(caps) && caps.length > 0) return true;
+    return CAPACITOR_ROW_RE_JS.test(String(item || ''));
+  }
+
+  function normalizeCapUnit(rawUnit) {
+    const low = String(rawUnit || '').trim().toLowerCase();
+    if (low === 'mf') return 'mF';
+    if (low === 'nf') return 'nF';
+    return 'µF';
+  }
+
+  function normalizeCapItems(rawCaps) {
+    if (!Array.isArray(rawCaps)) return [];
+    const out = [];
+    for (const c of rawCaps) {
+      if (!c || typeof c !== 'object') continue;
+      const spec = String(c.spec || '').trim();
+      const capVal = String(c.cap_val || '').trim();
+      const capUnit = normalizeCapUnit(c.cap_unit || 'µF');
+      const esrVal = String(c.esr_val || '').trim();
+      const note = String(c.note || '').trim();
+      if (!spec && !capVal && !esrVal && !note) continue;
+      const id = String(c.id || '').trim() || `cap-${out.length + 1}`;
+      out.push({ id, spec, cap_val: capVal, cap_unit: capUnit, esr_val: esrVal, note });
+    }
+    return out;
+  }
+
+  function serializeCapsToResult(caps) {
+    const norm = normalizeCapItems(caps);
+    if (!norm.length) return '';
+    return norm.map((c) => {
+      const parts = [];
+      if (c.cap_val) parts.push(`${c.cap_val} ${c.cap_unit || 'µF'}`);
+      if (c.esr_val) parts.push(`ESR ${c.esr_val} Ω`);
+      if (c.note) parts.push(c.note);
+      const rhs = parts.join(' | ');
+      if (c.spec && rhs) return `- ${c.spec}: ${rhs}`;
+      if (c.spec) return `- ${c.spec}`;
+      return `- ${rhs}`;
+    }).join('\n');
+  }
+
+  function _removeSpansJS(text, spans) {
+    if (!spans || !spans.length) return text;
+    const sorted = [...spans].sort((a, b) => a[0] - b[0]);
+    const merged = [];
+    for (const [s, e] of sorted) {
+      if (!merged.length || s > merged[merged.length - 1][1]) {
+        merged.push([s, e]);
+      } else {
+        merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], e);
+      }
+    }
+    const pieces = [];
+    let pos = 0;
+    for (const [s, e] of merged) {
+      const between = text.slice(pos, s);
+      if (!(pos > 0 && /^[\s/|,\-–~]+$/.test(between))) {
+        pieces.push(between);
+      }
+      pos = e;
+    }
+    pieces.push(text.slice(pos));
+    return pieces.join('')
+      .replace(/\s*\|+\s*/g, ', ')
+      .replace(/\s*\/+\s*/g, ' ')
+      .replace(/\s*,\s*,+/g, ', ')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/^[\s\-–~,|/;:]+|[\s\-–~,|/;:]+$/g, '')
+      .replace(/\s+,/g, ',')
+      .trim();
+  }
+
+  function parseCapacitorLines(text) {
+    if (!text || !String(text).trim()) return [];
+    const out = [];
+    for (const rawLine of String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      const body = line.replace(/^(?:[-•*]+|\d+[.)])\s*/, '').trim();
+      if (!body) continue;
+
+      let spec = body;
+      let rhs = '';
+      const colonIdx = body.indexOf(':');
+      if (colonIdx >= 0) {
+        spec = body.slice(0, colonIdx).trim();
+        rhs = body.slice(colonIdx + 1).trim();
+      }
+
+      const capVals = [];
+      const capUnits = [];
+      const consumedSpans = [];
+      const capRe = new RegExp(_CAP_VAL_RE_JS.source, 'gi');
+      let m;
+      while ((m = capRe.exec(rhs)) !== null) {
+        capVals.push(String(m[1] || '').trim().replace(/\s*[-–~]\s*/g, ' - '));
+        capUnits.push(normalizeCapUnit(m[2]));
+        consumedSpans.push([m.index, m.index + m[0].length]);
+      }
+      const capVal = capVals.length ? capVals.join(' - ') : '';
+      const capUnit = capUnits.length ? capUnits[0] : 'µF';
+
+      const esrVals = [];
+      const expRe = new RegExp(_CAP_EXPLICIT_ESR_RE_JS.source, 'gi');
+      while ((m = expRe.exec(rhs)) !== null) {
+        esrVals.push(String(m[1] || '').trim().replace(/\s*[-–~]\s*/g, ' - '));
+        consumedSpans.push([m.index, m.index + m[0].length]);
+      }
+      if (!esrVals.length) {
+        const ohmRe = new RegExp(_CAP_OHM_RE_JS.source, 'gi');
+        while ((m = ohmRe.exec(rhs)) !== null) {
+          esrVals.push(String(m[1] || '').trim().replace(/\s*[-–~]\s*/g, ' - '));
+          consumedSpans.push([m.index, m.index + m[0].length]);
+        }
+      }
+      const esrVal = esrVals.length ? esrVals.join(' - ') : '';
+      const note = rhs ? _removeSpansJS(rhs, consumedSpans) : '';
+      out.push({
+        id: `cap-${out.length + 1}`,
+        spec,
+        cap_val: capVal,
+        cap_unit: capUnit,
+        esr_val: esrVal,
+        note,
+      });
+    }
+    return out;
+  }
+
   function normalizeColdCheckRows(rawRows) {
     let arr = rawRows;
     if (typeof arr === 'string') {
@@ -1701,12 +1966,27 @@
     for (const d of arr) {
       if (!d || typeof d !== 'object') continue;
       const item = String(d.item || '').trim();
-      const result = String(d.result || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
-      if (!item && !result) continue;
+      let result = String(d.result || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+      const hasRawCaps = Array.isArray(d.caps);
+      let caps = hasRawCaps ? normalizeCapItems(d.caps) : null;
+      const isCap = isCapacitorColdRow(item, caps);
+
+      if (caps && caps.length > 0) {
+        const syncedRes = serializeCapsToResult(caps);
+        if (syncedRes) result = syncedRes;
+      } else if (isCap && !hasRawCaps && result) {
+        caps = parseCapacitorLines(result);
+      }
+
+      if (!item && !result && !(caps && caps.length > 0)) continue;
       let status = String(d.status || 'none').trim().toLowerCase();
       if (!_CC_VALID_STATUSES_JS.has(status)) status = 'none';
       const id = String(d.id || '').trim() || `cc-${out.length + 1}`;
-      out.push({ id, item, result, status });
+      const rowObj = { id, item, result, status };
+      if (isCap || caps !== null) {
+        rowObj.caps = caps || [];
+      }
+      out.push(rowObj);
     }
     return out;
   }
@@ -1755,12 +2035,16 @@
       const item = String(r.item || '').trim();
       const result = String(r.result || '').trim();
       if (!item && !result) continue;
-      out.push({
+      const rowObj = {
         id: `cc-${out.length + 1}`,
         item,
         result,
         status: _inferColdCheckStatusJS(result),
-      });
+      };
+      if (isCapacitorColdRow(item)) {
+        rowObj.caps = result ? parseCapacitorLines(result) : [];
+      }
+      out.push(rowObj);
     }
     return out;
   }
@@ -2034,6 +2318,45 @@
       }
     }
 
+  function _mergeEnOverridesJS(curObj, incoming) {
+    const out = (curObj && typeof curObj === 'object' && !Array.isArray(curObj)) ? { ...curObj } : {};
+    if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return out;
+    Object.keys(incoming).forEach((k) => {
+      const ck = String(k || '').trim();
+      if (!ck) return;
+      const val = String(incoming[k] || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\s+$/, '');
+      if (val.trim()) out[ck] = val;
+      else delete out[ck];
+    });
+    return out;
+  }
+
+  function _normalizeCustomSectionsJS(rawSecs) {
+    if (!Array.isArray(rawSecs)) return [];
+    const out = [];
+    rawSecs.forEach((s, idx) => {
+      if (!s || typeof s !== 'object') return;
+      const title = String(s.title || '').trim();
+      const content = String(s.content || '').replace(/\s+$/, '');
+      const titleEn = String(s.title_en || '').trim();
+      const contentEn = String(s.content_en || '').replace(/\s+$/, '');
+      const imgs = Array.isArray(s.images) ? s.images.filter((im) => im && String(im.url || '').trim()) : [];
+      if (!title && !content && !titleEn && !contentEn && !imgs.length) return;
+      const style = ['info', 'warn', 'code', 'pitfall', 'qa'].includes(s.style) ? s.style : 'info';
+      const obj = {
+        id: String(s.id || '').trim() || `sec-${idx + 1}`,
+        title: title || `MỤC ${String(idx + 1).padStart(2, '0')}`,
+        style,
+        content,
+        images: imgs,
+      };
+      if (titleEn) obj.title_en = titleEn;
+      if (contentEn) obj.content_en = contentEn;
+      out.push(obj);
+    });
+    return out;
+  }
+
     // ---- Knowledge Items CRUD ----
     if (p === '/api/knowledge-items' && m === 'POST') {
       const id = (body.id || '').trim() || _nextSeqId(snap.knowledge_items, 'KNW');
@@ -2075,14 +2398,44 @@
       await saveLocalSnapshot(snap);
       return _jsonResponse(rec);
     }
+    match = p.match(/^\/api\/knowledge-items\/([^/]+)\/inline$/);
+    if (match && m === 'PATCH') {
+      const id = decodeURIComponent(match[1]);
+      const rec = (snap.knowledge_items || []).find((r) => r.id === id);
+      if (!rec) return _jsonResponse({ detail: 'Not found' }, 404);
+      if (body.topic_model !== undefined && body.topic_model !== null) {
+        const nextTopic = String(body.topic_model).trim();
+        if (!nextTopic) return _jsonResponse({ detail: 'Chủ đề không được để trống' }, 400);
+        rec.topic_model = nextTopic;
+      }
+      if (body.key_takeaway !== undefined && body.key_takeaway !== null) rec.key_takeaway = String(body.key_takeaway).trim();
+      if (body.core_concept_workflow !== undefined && body.core_concept_workflow !== null) rec.core_concept_workflow = String(body.core_concept_workflow).replace(/\s+$/, '');
+      if (body.why_question !== undefined && body.why_question !== null) rec.why_question = String(body.why_question).replace(/\s+$/, '');
+      if (body.actionable_application !== undefined && body.actionable_application !== null) rec.actionable_application = String(body.actionable_application).replace(/\s+$/, '');
+      if (body.note !== undefined && body.note !== null) rec.note = String(body.note).replace(/\s+$/, '');
+      if (body.custom_sections_json !== undefined) rec.custom_sections_json = _normalizeCustomSectionsJS(body.custom_sections_json);
+      if (body.en_overrides_json !== undefined) rec.en_overrides_json = _mergeEnOverridesJS(rec.en_overrides_json, body.en_overrides_json);
+      rec.updated_at = utcNowIso();
+      await saveLocalSnapshot(snap);
+      return _jsonResponse(rec);
+    }
     match = p.match(/^\/api\/knowledge-items\/([^/]+)$/);
     if (match) {
       const id = decodeURIComponent(match[1]);
       const idx = (snap.knowledge_items || []).findIndex((r) => r.id === id);
       if (idx < 0) return _jsonResponse({ detail: 'Not found' }, 404);
       if (m === 'PUT') {
+        const cur = snap.knowledge_items[idx];
         const [sc, sl] = _normalizeStatus(body.status_code);
-        snap.knowledge_items[idx] = { ...snap.knowledge_items[idx], ...body, id, status_code: sc, status_label: sl, updated_at: utcNowIso() };
+        snap.knowledge_items[idx] = {
+          ...cur,
+          ...body,
+          id,
+          en_overrides_json: body.en_overrides_json !== undefined ? _mergeEnOverridesJS(cur.en_overrides_json, body.en_overrides_json) : (cur.en_overrides_json || {}),
+          status_code: sc,
+          status_label: sl,
+          updated_at: utcNowIso(),
+        };
         await saveLocalSnapshot(snap);
         return _jsonResponse(snap.knowledge_items[idx]);
       }
@@ -2109,8 +2462,9 @@
         code_snippet: body.code_snippet || '',
         common_pitfalls: body.common_pitfalls || '',
         interview_qa: body.interview_qa || '',
-        custom_sections_json: body.custom_sections_json || [],
+        custom_sections_json: _normalizeCustomSectionsJS(body.custom_sections_json || []),
         drill_qa_json: body.drill_qa_json || [],
+        en_overrides_json: body.en_overrides_json || {},
         status_code: sc,
         status_label: sl,
         tags: body.tags || [],
@@ -2135,14 +2489,43 @@
       await saveLocalSnapshot(snap);
       return _jsonResponse(rec);
     }
+    match = p.match(/^\/api\/plc-notes\/([^/]+)\/inline$/);
+    if (match && m === 'PATCH') {
+      const id = decodeURIComponent(match[1]);
+      const rec = (snap.plc_notes || []).find((r) => r.id === id);
+      if (!rec) return _jsonResponse({ detail: 'Not found' }, 404);
+      if (body.title !== undefined && body.title !== null) {
+        const nextTitle = String(body.title).trim();
+        if (!nextTitle) return _jsonResponse({ detail: 'Tiêu đề bài PLC không được để trống' }, 400);
+        rec.title = nextTitle;
+      }
+      if (body.core_summary !== undefined && body.core_summary !== null) rec.core_summary = String(body.core_summary).replace(/\s+$/, '');
+      if (body.code_snippet !== undefined && body.code_snippet !== null) rec.code_snippet = String(body.code_snippet).replace(/\s+$/, '');
+      if (body.common_pitfalls !== undefined && body.common_pitfalls !== null) rec.common_pitfalls = String(body.common_pitfalls).replace(/\s+$/, '');
+      if (body.interview_qa !== undefined && body.interview_qa !== null) rec.interview_qa = String(body.interview_qa).replace(/\s+$/, '');
+      if (body.custom_sections_json !== undefined) rec.custom_sections_json = _normalizeCustomSectionsJS(body.custom_sections_json);
+      if (body.en_overrides_json !== undefined) rec.en_overrides_json = _mergeEnOverridesJS(rec.en_overrides_json, body.en_overrides_json);
+      rec.updated_at = utcNowIso();
+      await saveLocalSnapshot(snap);
+      return _jsonResponse(rec);
+    }
     match = p.match(/^\/api\/plc-notes\/([^/]+)$/);
     if (match) {
       const id = decodeURIComponent(match[1]);
       const idx = (snap.plc_notes || []).findIndex((r) => r.id === id);
       if (idx < 0) return _jsonResponse({ detail: 'Not found' }, 404);
       if (m === 'PUT') {
+        const cur = snap.plc_notes[idx];
         const [sc, sl] = _normalizeStatus(body.status_code);
-        snap.plc_notes[idx] = { ...snap.plc_notes[idx], ...body, id, status_code: sc, status_label: sl, updated_at: utcNowIso() };
+        snap.plc_notes[idx] = {
+          ...cur,
+          ...body,
+          id,
+          en_overrides_json: body.en_overrides_json !== undefined ? _mergeEnOverridesJS(cur.en_overrides_json, body.en_overrides_json) : (cur.en_overrides_json || {}),
+          status_code: sc,
+          status_label: sl,
+          updated_at: utcNowIso(),
+        };
         await saveLocalSnapshot(snap);
         return _jsonResponse(snap.plc_notes[idx]);
       }
@@ -2168,8 +2551,9 @@
         register_map_json: body.register_map_json || [],
         test_script_code: body.test_script_code || '',
         troubleshooting_tips: body.troubleshooting_tips || '',
-        custom_sections_json: body.custom_sections_json || [],
+        custom_sections_json: _normalizeCustomSectionsJS(body.custom_sections_json || []),
         drill_qa_json: body.drill_qa_json || [],
+        en_overrides_json: body.en_overrides_json || {},
         status_code: sc,
         status_label: sl,
         tags: body.tags || [],
@@ -2194,14 +2578,43 @@
       await saveLocalSnapshot(snap);
       return _jsonResponse(rec);
     }
+    match = p.match(/^\/api\/network-(?:notes|configs)\/([^/]+)\/inline$/);
+    if (match && m === 'PATCH') {
+      const id = decodeURIComponent(match[1]);
+      const rec = (snap.network_notes || []).find((r) => r.id === id);
+      if (!rec) return _jsonResponse({ detail: 'Not found' }, 404);
+      if (body.target_device !== undefined && body.target_device !== null) {
+        const nextDev = String(body.target_device).trim();
+        if (!nextDev) return _jsonResponse({ detail: 'Tên thiết bị đích không được để trống' }, 400);
+        rec.target_device = nextDev;
+      }
+      if (body.physical_wiring !== undefined && body.physical_wiring !== null) rec.physical_wiring = String(body.physical_wiring).replace(/\s+$/, '');
+      if (body.comm_settings !== undefined && body.comm_settings !== null) rec.comm_settings = String(body.comm_settings).replace(/\s+$/, '');
+      if (body.test_script_code !== undefined && body.test_script_code !== null) rec.test_script_code = String(body.test_script_code).replace(/\s+$/, '');
+      if (body.troubleshooting_tips !== undefined && body.troubleshooting_tips !== null) rec.troubleshooting_tips = String(body.troubleshooting_tips).replace(/\s+$/, '');
+      if (body.custom_sections_json !== undefined) rec.custom_sections_json = _normalizeCustomSectionsJS(body.custom_sections_json);
+      if (body.en_overrides_json !== undefined) rec.en_overrides_json = _mergeEnOverridesJS(rec.en_overrides_json, body.en_overrides_json);
+      rec.updated_at = utcNowIso();
+      await saveLocalSnapshot(snap);
+      return _jsonResponse(rec);
+    }
     match = p.match(/^\/api\/network-notes\/([^/]+)$/);
     if (match) {
       const id = decodeURIComponent(match[1]);
       const idx = (snap.network_notes || []).findIndex((r) => r.id === id);
       if (idx < 0) return _jsonResponse({ detail: 'Not found' }, 404);
       if (m === 'PUT') {
+        const cur = snap.network_notes[idx];
         const [sc, sl] = _normalizeStatus(body.status_code);
-        snap.network_notes[idx] = { ...snap.network_notes[idx], ...body, id, status_code: sc, status_label: sl, updated_at: utcNowIso() };
+        snap.network_notes[idx] = {
+          ...cur,
+          ...body,
+          id,
+          en_overrides_json: body.en_overrides_json !== undefined ? _mergeEnOverridesJS(cur.en_overrides_json, body.en_overrides_json) : (cur.en_overrides_json || {}),
+          status_code: sc,
+          status_label: sl,
+          updated_at: utcNowIso(),
+        };
         await saveLocalSnapshot(snap);
         return _jsonResponse(snap.network_notes[idx]);
       }
@@ -2265,7 +2678,23 @@
       const list = kind === 'knowledge' ? snap.knowledge_items : (kind === 'plc' ? snap.plc_notes : snap.network_notes);
       const rec = (list || []).find((r) => r.id === id);
       if (!rec) return _jsonResponse({ detail: 'Not found' }, 404);
-      if (body.custom_sections_json !== undefined) rec.custom_sections_json = body.custom_sections_json;
+      if (body.custom_sections_json !== undefined) {
+        const secs = _normalizeCustomSectionsJS(body.custom_sections_json);
+        rec.custom_sections_json = secs;
+        if (kind === 'plc') {
+          const findC = (stList) => (secs.find((s) => stList.includes(s.style) && s.content) || {}).content;
+          rec.core_summary = findC(['warn', 'info']) ?? (rec.core_summary || '');
+          rec.code_snippet = findC(['code']) ?? (rec.code_snippet || '');
+          rec.common_pitfalls = findC(['pitfall']) ?? (rec.common_pitfalls || '');
+          rec.interview_qa = findC(['qa']) ?? (rec.interview_qa || '');
+        } else if (kind === 'network') {
+          const findC = (stList) => (secs.find((s) => stList.includes(s.style) && s.content) || {}).content;
+          rec.physical_wiring = findC(['warn']) ?? (rec.physical_wiring || '');
+          rec.comm_settings = findC(['info']) ?? (rec.comm_settings || '');
+          rec.test_script_code = findC(['code']) ?? (rec.test_script_code || '');
+          rec.troubleshooting_tips = findC(['pitfall']) ?? (rec.troubleshooting_tips || '');
+        }
+      }
       rec.updated_at = utcNowIso();
       await saveLocalSnapshot(snap);
       return _jsonResponse(rec);
@@ -2313,9 +2742,18 @@
         const errBox = {};
         const aiOut = await _callGeminiJsonDirect(_buildFlashcardGeminiPromptJS(body), body.api_key || '', errBox);
         if (aiOut && typeof aiOut === 'object' && ('overall_score' in aiOut || 'note_match_score' in aiOut || 'verdict' in aiOut)) {
-          return _jsonResponse({ ..._normalizeGeminiFlashcardEval(aiOut, offlineRes), used_model: errBox.model || '' });
+          return _jsonResponse({
+            ..._normalizeGeminiFlashcardEval(aiOut, offlineRes),
+            used_model: errBox.model || '',
+            used_endpoint: errBox.endpoint || '',
+          });
         }
-        return _jsonResponse({ ...offlineRes, ai_error: errBox.error || 'AI trả về dữ liệu chấm điểm không hợp lệ' });
+        return _jsonResponse({
+          ...offlineRes,
+          ai_error: errBox.error || 'AI trả về dữ liệu chấm điểm không hợp lệ',
+          ai_http_status: errBox.http_status || 0,
+          ai_endpoint: errBox.endpoint || '',
+        });
       }
       return _jsonResponse(offlineRes);
     }
@@ -2332,12 +2770,18 @@
         return _jsonResponse({
           engine: 'gemini',
           used_model: errBox.model || '',
+          used_endpoint: errBox.endpoint || '',
           focus_tag: String(aiOut.focus_tag || offlineRes.focus_tag).trim(),
           followup_question: String(aiOut.followup_question).trim(),
           model_answer: String(aiOut.model_answer || offlineRes.model_answer).trim(),
         });
       }
-      return _jsonResponse({ ...offlineRes, ai_error: errBox.error || '' });
+      return _jsonResponse({
+        ...offlineRes,
+        ai_error: errBox.error || '',
+        ai_http_status: errBox.http_status || 0,
+        ai_endpoint: errBox.endpoint || '',
+      });
     }
     match = p.match(/^\/api\/workspace-categories\/([^/]+)\/reset$/);
     if (match && m === 'POST') {
@@ -2456,26 +2900,38 @@
         const k = cfg.gemini_api_key || '';
         return _jsonResponse({ has_key: Boolean(k), masked_key: k ? `${k.slice(0, 6)}...${k.slice(-4)}` : '', model: cfg.gemini_model || 'gemini-3.5-flash-lite' });
       }
-      const saved = saveAiConfig(body.gemini_api_key, body.gemini_model);
+      const rawIn = String(body.gemini_api_key || '').trim();
+      const cleanedIn = rawIn === '__KEEP__' ? '__KEEP__' : _sanitizeGeminiKeyJS(rawIn);
+      if (cleanedIn && cleanedIn !== '__KEEP__') {
+        const badMsg = _validateGeminiKeyJS(cleanedIn);
+        if (badMsg) return _jsonResponse({ detail: badMsg, error: badMsg }, 400);
+      }
+      const saved = saveAiConfig(cleanedIn, body.gemini_model);
       const k = saved.gemini_api_key || '';
       return _jsonResponse({ saved: true, has_key: Boolean(k), masked_key: k ? `${k.slice(0, 6)}...${k.slice(-4)}` : '', model: saved.gemini_model });
     }
     if (p === '/api/english/ai-config/test' && m === 'POST') {
       const cfg = getAiConfig();
-      const rawKey = String(body.gemini_api_key || '').trim();
-      const testKey = (rawKey && rawKey !== '__KEEP__') ? rawKey : (cfg.gemini_api_key || '');
+      const rawIn = String(body.gemini_api_key || '').trim();
+      const rawKey = rawIn === '__KEEP__' ? '__KEEP__' : _sanitizeGeminiKeyJS(rawIn);
+      const testKey = (rawKey && rawKey !== '__KEEP__') ? rawKey : _sanitizeGeminiKeyJS(cfg.gemini_api_key || '');
       const testModel = String(body.gemini_model || cfg.gemini_model || 'gemini-3.5-flash-lite').trim() || 'gemini-3.5-flash-lite';
       if (!testKey) {
         return _jsonResponse({ ok: false, http_status: 0, model: testModel, endpoint: '', error: 'Chưa nhập hoặc chưa lưu Gemini API Key.' });
       }
+      const badMsg = _validateGeminiKeyJS(testKey);
+      if (badMsg) {
+        return _jsonResponse({ ok: false, http_status: 400, model: testModel, endpoint: '', error: badMsg });
+      }
       const out = await _callGeminiJsonDetailedDirect('Reply with ONLY valid JSON: {"ok": true, "pong": "ready"}', testKey, testModel);
       if (out.data !== null) {
+        const epLabel = out.endpoint || 'Google AI';
         return _jsonResponse({
           ok: true,
           http_status: 200,
           model: out.model,
-          endpoint: out.endpoint,
-          message: `✓ Kết nối thành công (Model: ${out.model})`,
+          endpoint: epLabel,
+          message: `✓ Kết nối thành công (Model: ${out.model} · Endpoint: ${epLabel})`,
         });
       }
       return _jsonResponse({
@@ -3514,6 +3970,12 @@
     parseColdCheckTextToRows,
     serializeColdCheckRowsToText,
     resolveColdCheckRows,
+    CAP_UNITS: CAP_UNITS_JS,
+    isCapacitorColdRow,
+    normalizeCapUnit,
+    normalizeCapItems,
+    serializeCapsToResult,
+    parseCapacitorLines,
   };
 
   window.MRLSyncEngine = {

@@ -1064,6 +1064,8 @@ function _translateUiLeafNodes(rootEl, toEn) {
     '.detail-pane .cold-check-body',
     '.detail-pane .cc-cell-item',
     '.detail-pane .cc-cell-result',
+    '.detail-pane .cc-cell-caps',
+    '.cc-cap-grid',
     '.detail-pane .warn-body',
     '.detail-pane .nb-body',
     '.rep-inline-editor',
@@ -1292,7 +1294,7 @@ async function translateVisibleRecordContentToEn() {
 
   const targets = [];
   document.querySelectorAll(selectors.join(', ')).forEach((el) => {
-    if (el.closest('.hidden') || el.closest('#view-en-vocab-bank') || el.querySelector('.inline-empty-prompt, .none') || el.closest('.bilingual-sec-wrap') || el.closest('.rep-inline-editing, .uni-inline-editing, #inline-sec-editor-box') || el.querySelector('.rep-inline-editor, .uni-inline-editor')) return;
+    if (el.closest('.hidden') || el.closest('#view-en-vocab-bank') || el.querySelector('.inline-empty-prompt, .none') || el.closest('.bilingual-sec-wrap') || el.closest('.rep-inline-editing, .uni-inline-editing, #inline-sec-editor-box, .cc-cell-caps, .cc-cap-grid, [data-has-custom-en="1"], [data-no-i18n="1"]') || el.dataset.hasCustomEn === '1' || el.dataset.noI18n === '1' || el.querySelector('.rep-inline-editor, .uni-inline-editor, .cc-cap-grid')) return;
     if (el.classList.contains('row-step-count') && el.closest('#plc-list, #network-list')) return;
     if (el.dataset.viHtmlOrig === undefined) {
       el.dataset.viHtmlOrig = el.innerHTML;

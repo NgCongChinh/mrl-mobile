@@ -33,9 +33,56 @@ function _serializeColdCheckRowsJS(rows) {
   return '';
 }
 
+function _isCapRowJS(r) {
+  if (!r) return false;
+  if (window.MRLCoreStore && typeof window.MRLCoreStore.isCapacitorColdRow === 'function') {
+    return window.MRLCoreStore.isCapacitorColdRow(r.item, r.caps);
+  }
+  return (Array.isArray(r.caps) && r.caps.length > 0) || /tụ|capacitor|\bcap\b|\besr\b/i.test(String(r.item || ''));
+}
+
+function _cloneCapItemsJS(caps) {
+  return Array.isArray(caps) ? caps.map((x) => ({ ...x })) : [];
+}
+
+function _getCapsForRow(r) {
+  if (!r) return [];
+  if (Array.isArray(r.caps)) return _cloneCapItemsJS(r.caps);
+  if (r.result && window.MRLCoreStore && typeof window.MRLCoreStore.parseCapacitorLines === 'function') {
+    return window.MRLCoreStore.parseCapacitorLines(r.result);
+  }
+  return [];
+}
+
+function _serializeCapsJS(caps) {
+  if (window.MRLCoreStore && typeof window.MRLCoreStore.serializeCapsToResult === 'function') {
+    return window.MRLCoreStore.serializeCapsToResult(caps);
+  }
+  return '';
+}
+
+function _preserveColdRowForPayload(r, idx) {
+  const obj = {
+    id: r.id && !String(r.id).startsWith('cc-draft-') ? r.id : `cc-${idx + 1}`,
+    item: String(r.item || '').trim(),
+    result: String(r.result || '').trim(),
+    status: r.status || 'none',
+  };
+  if (Array.isArray(r.caps)) {
+    obj.caps = _cloneCapItemsJS(r.caps);
+  } else if (_isCapRowJS(obj)) {
+    obj.caps = _getCapsForRow(obj);
+  }
+  return obj;
+}
+
 function _getDisplayColdRowsForCase(c) {
   if (!c) return [];
-  const saved = _resolveColdCheckRowsForCase(c).map((r) => ({ ...r, _isDraft: false }));
+  const saved = _resolveColdCheckRowsForCase(c).map((r) => ({
+    ...r,
+    ...(Array.isArray(r.caps) ? { caps: _cloneCapItemsJS(r.caps) } : {}),
+    _isDraft: false,
+  }));
   const drafts = (state.repairDraftColdRows && Array.isArray(state.repairDraftColdRows[c.id]))
     ? state.repairDraftColdRows[c.id]
     : [];
@@ -46,6 +93,7 @@ function _getDisplayColdRowsForCase(c) {
       item: d.item || '',
       result: d.result || '',
       status: d.status || 'none',
+      ...(Array.isArray(d.caps) ? { caps: _cloneCapItemsJS(d.caps) } : {}),
       _isDraft: true,
       _insertAt: typeof d._insertAt === 'number' ? d._insertAt : null,
     };
@@ -308,6 +356,65 @@ function _coldCheckCountMetaHtml(rows, isEn = _repairIsEnLang()) {
   return parts.join(' · ');
 }
 
+function _renderCapGridRowHtml(cid, ccIdx, cap, capIdx, inline = true, isEn = _repairIsEnLang()) {
+  const capId = escapeHtml(cap.id || `cap-${capIdx + 1}`);
+  const unit = escapeHtml(cap.cap_unit || 'µF');
+  if (!inline) {
+    return `
+      <div class="cc-cap-row readonly" data-cap-idx="${capIdx}" data-cap-id="${capId}">
+        <div class="cc-cap-spec-col"><span class="cc-cap-spec-txt">${escapeHtml(cap.spec || '—')}</span></div>
+        <div class="cc-cap-meas-col">
+          ${cap.cap_val ? `<span class="cc-cap-val-txt mono">${escapeHtml(cap.cap_val)} ${unit}</span>` : '<span class="none">—</span>'}
+          ${cap.esr_val ? `<span class="cc-cap-sep">|</span><span class="cc-cap-esr-lbl">ESR</span><span class="cc-cap-esr-txt mono">${escapeHtml(cap.esr_val)} Ω</span>` : ''}
+          ${cap.note ? `<span class="cc-cap-note-txt">${escapeHtml(cap.note)}</span>` : ''}
+        </div>
+      </div>`;
+  }
+  return `
+    <div class="cc-cap-row" data-cap-idx="${capIdx}" data-cap-id="${capId}">
+      <div class="cc-cap-spec-col">
+        <input type="text" class="cc-cap-inp cc-cap-spec" data-cap-field="spec" spellcheck="false"
+               placeholder="${isEn ? 'e.g. 470µF/50V' : 'VD: 470µF/50V'}"
+               value="${escapeHtml(cap.spec || '')}"
+               onkeydown="onCapInputKeydown(event, '${cid}', ${ccIdx}, ${capIdx}, 'spec')"
+               onblur="onCapInputBlur(event, '${cid}', ${ccIdx})" />
+      </div>
+      <div class="cc-cap-meas-col">
+        <div class="cc-cap-val-group">
+          <input type="text" class="cc-cap-inp cc-cap-val mono" data-cap-field="cap_val" spellcheck="false"
+                 placeholder="${isEn ? 'Meas' : 'Đo'}"
+                 value="${escapeHtml(cap.cap_val || '')}"
+                 onkeydown="onCapInputKeydown(event, '${cid}', ${ccIdx}, ${capIdx}, 'cap_val')"
+                 onblur="onCapInputBlur(event, '${cid}', ${ccIdx})" />
+          <button type="button" class="cc-cap-unit-btn" tabindex="-1" data-cap-unit="${unit}" data-no-i18n="1"
+                  onmousedown="event.preventDefault()"
+                  onclick="cycleCapRowUnitInline('${cid}', ${ccIdx}, ${capIdx}, this, event)"
+                  title="${isEn ? 'Click to switch µF / mF / nF' : 'Bấm xoay vòng đơn vị µF → mF → nF'}">${unit}</button>
+        </div>
+        <span class="cc-cap-sep">|</span>
+        <div class="cc-cap-esr-group">
+          <span class="cc-cap-esr-lbl">ESR</span>
+          <input type="text" class="cc-cap-inp cc-cap-esr mono" data-cap-field="esr_val" spellcheck="false"
+                 placeholder="0.00"
+                 value="${escapeHtml(cap.esr_val || '')}"
+                 onkeydown="onCapInputKeydown(event, '${cid}', ${ccIdx}, ${capIdx}, 'esr_val')"
+                 onblur="onCapInputBlur(event, '${cid}', ${ccIdx})" />
+          <span class="cc-cap-ohm">Ω</span>
+        </div>
+        <input type="text" class="cc-cap-inp cc-cap-note" data-cap-field="note" spellcheck="false"
+               placeholder="${isEn ? 'note...' : 'ghi chú...'}"
+               value="${escapeHtml(cap.note || '')}"
+               onkeydown="onCapInputKeydown(event, '${cid}', ${ccIdx}, ${capIdx}, 'note')"
+               onblur="onCapInputBlur(event, '${cid}', ${ccIdx})" />
+      </div>
+      <button type="button" class="cc-cap-del-btn" tabindex="-1"
+              onmousedown="event.preventDefault()"
+              onclick="deleteCapRowInline('${cid}', ${ccIdx}, ${capIdx}, event)"
+              title="${isEn ? 'Remove capacitor' : 'Xóa hàng tụ'}"
+              aria-label="${isEn ? 'Remove capacitor' : 'Xóa hàng tụ'}">×</button>
+    </div>`;
+}
+
 function renderRepairColdCheckBlockHtml(c, inline = true) {
   const rows = _getDisplayColdRowsForCase(c);
   const cid = escapeHtml(c.id);
@@ -328,14 +435,30 @@ function renderRepairColdCheckBlockHtml(c, inline = true) {
     const itemPh = isEn ? 'Component...' : 'Thành phần...';
     const resPh = isEn ? 'Measurement / Result...' : 'Kết quả / Thông số đo...';
     const itemHtml = _coldCheckCellHtml(r.item, c, itemPh);
-    const resHtml = _coldCheckCellHtml(r.result, c, resPh);
+    const isCap = _isCapRowJS(r);
 
     const itemAttrs = inline
       ? `class="cc-cell cc-cell-item cc-editable" data-cc-idx="${idx}" data-cc-field="item" onmousedown="onColdCheckCellMouseDown('${cid}', ${idx})" onclick="onRepairEditableClick(event, function(){ startColdCheckCellEdit('${cid}', ${idx}, 'item'); })"`
       : `class="cc-cell cc-cell-item"`;
-    const resAttrs = inline
-      ? `class="cc-cell cc-cell-result cc-editable" data-cc-idx="${idx}" data-cc-field="result" onmousedown="onColdCheckCellMouseDown('${cid}', ${idx})" onclick="onRepairEditableClick(event, function(){ startColdCheckCellEdit('${cid}', ${idx}, 'result'); })"`
-      : `class="cc-cell cc-cell-result"`;
+
+    let resultTdHtml = '';
+    if (isCap) {
+      const caps = _getCapsForRow(r);
+      const capsHtml = caps.map((cap, capIdx) => _renderCapGridRowHtml(cid, idx, cap, capIdx, inline, isEn)).join('');
+      resultTdHtml = `
+        <td class="cc-td-result cc-td-caps" data-no-i18n="1">
+          <div class="cc-cell cc-cell-caps" data-cc-idx="${idx}" data-cc-field="caps" data-no-i18n="1">
+            <div class="cc-cap-grid ${inline ? '' : 'readonly'}" data-cc-idx="${idx}">${capsHtml}</div>
+            ${inline ? `<div class="cc-cap-foot"><button type="button" class="cc-cap-add-btn" tabindex="-1" onmousedown="event.preventDefault()" onclick="addCapRowInline('${cid}', ${idx})">${isEn ? '+ Add cap' : '+ Thêm tụ'}</button></div>` : ''}
+          </div>
+        </td>`;
+    } else {
+      const resHtml = _coldCheckCellHtml(r.result, c, resPh);
+      const resAttrs = inline
+        ? `class="cc-cell cc-cell-result cc-editable" data-cc-idx="${idx}" data-cc-field="result" onmousedown="onColdCheckCellMouseDown('${cid}', ${idx})" onclick="onRepairEditableClick(event, function(){ startColdCheckCellEdit('${cid}', ${idx}, 'result'); })"`
+        : `class="cc-cell cc-cell-result"`;
+      resultTdHtml = `<td class="cc-td-result"><div ${resAttrs}>${resHtml}</div></td>`;
+    }
 
     const statusEl = inline
       ? `<button type="button" class="cc-status-btn ${meta.cls}" data-no-i18n="1" data-cc-status-idx="${idx}" onmousedown="event.preventDefault()" onclick="cycleColdCheckStatusInline('${cid}', ${idx}, event)" title="${isEn ? 'Click to cycle status (— / OK / Suspect / Fault)' : 'Chạm để đổi nhanh trạng thái (— / OK / Nghi ngờ / Hỏng)'}">${escapeHtml(meta.label)}</button>`
@@ -344,7 +467,7 @@ function renderRepairColdCheckBlockHtml(c, inline = true) {
     return `
       <tr class="cc-row cc-st-${st}" data-cc-idx="${idx}" data-cc-id="${escapeHtml(r.id || '')}">
         <td class="cc-td-item"><div ${itemAttrs}>${itemHtml}</div></td>
-        <td class="cc-td-result"><div ${resAttrs}>${resHtml}</div></td>
+        ${resultTdHtml}
         <td class="cc-td-status">${statusEl}</td>
         ${inline ? `<td class="cc-td-act"><button type="button" class="cc-del-btn" onmousedown="event.preventDefault()" onclick="deleteColdCheckRowInline('${cid}', ${idx}, event)" title="${isEn ? 'Delete row' : 'Xóa dòng'}" aria-label="${isEn ? 'Delete row' : 'Xóa dòng'}">×</button></td>` : ''}
       </tr>`;
@@ -490,7 +613,11 @@ function buildRepairDetailHtml(c, opts = {}) {
 // ---------------------------------------------------------------------------
 function onRepairEditableClick(event, callback) {
   if (!event || !callback) return;
-  if (event.target.closest('button, a, input, textarea, select, .itag, .rep-inline-editor')) return;
+  if (event.target.closest(
+    'button, a, input, textarea, select, .itag, .en-term-hl, .study-word, .vocab-hl, [data-copy], .code-copy-btn, .rep-inline-editor'
+  )) return;
+  const codeAncestor = event.target?.closest?.('code');
+  if (codeAncestor && (codeAncestor.dataset.copy !== undefined || codeAncestor.querySelector('button, .copy-btn'))) return;
   const sel = typeof window.getSelection === 'function' ? window.getSelection() : null;
   if (sel && sel.toString().trim().length > 0) return;
   callback();
@@ -628,6 +755,10 @@ async function startColdCheckCellEdit(caseId, rowIdx, field) {
   if (!c) return;
   const rows = _getDisplayColdRowsForCase(c);
   const row = rows[rowIdx];
+  if (field === 'result' && row && _isCapRowJS(row)) {
+    _focusCapGridFirstInput(caseId, rowIdx);
+    return;
+  }
   const hostEl = document.querySelector(`#repair-detail .cc-cell[data-cc-idx="${rowIdx}"][data-cc-field="${field}"]`);
   if (!row || !hostEl) return;
 
@@ -798,12 +929,7 @@ async function insertColdCheckTemplateInline(caseId) {
   }
 
   const rollback = _cloneRepairBackup(c);
-  const nextRows = [...curRows, ...toAdd].map((r, i) => ({
-    id: r.id || `cc-${i + 1}`,
-    item: r.item || '',
-    result: r.result || '',
-    status: r.status || 'none',
-  }));
+  const nextRows = [...curRows, ...toAdd].map((r, i) => _preserveColdRowForPayload(r, i));
   const firstNewIdx = curRows.length;
 
   c.cold_check_json = nextRows;
@@ -848,13 +974,11 @@ async function cycleColdCheckStatusInline(caseId, rowIdx, event) {
   const rollback = _cloneRepairBackup(c);
   const nextRows = displayRows
     .map((r, i) => ({
-      id: r.id || `cc-${i + 1}`,
-      item: String(r.item || '').trim(),
-      result: String(r.result || '').trim(),
+      ...r,
       status: i === rowIdx ? nextStatus : (r.status || 'none'),
     }))
-    .filter((r) => r.item || r.result)
-    .map((r, i) => ({ ...r, id: r.id && !String(r.id).startsWith('cc-draft-') ? r.id : `cc-${i + 1}` }));
+    .filter((r) => String(r.item || '').trim() || String(r.result || '').trim() || (Array.isArray(r.caps) && r.caps.length > 0))
+    .map((r, i) => _preserveColdRowForPayload(r, i));
 
   if (state.repairDraftColdRows && state.repairDraftColdRows[caseId]) {
     delete state.repairDraftColdRows[caseId];
@@ -904,13 +1028,8 @@ async function deleteColdCheckRowInline(caseId, rowIdx, event) {
   const rollback = _cloneRepairBackup(c);
   const nextRows = displayRows
     .filter((_, i) => i !== rowIdx)
-    .filter((r) => !r._isDraft && (String(r.item || '').trim() || String(r.result || '').trim()))
-    .map((r, i) => ({
-      id: r.id && !String(r.id).startsWith('cc-draft-') ? r.id : `cc-${i + 1}`,
-      item: String(r.item || '').trim(),
-      result: String(r.result || '').trim(),
-      status: r.status || 'none',
-    }));
+    .filter((r) => !r._isDraft && (String(r.item || '').trim() || String(r.result || '').trim() || (Array.isArray(r.caps) && r.caps.length > 0)))
+    .map((r, i) => _preserveColdRowForPayload(r, i));
 
   if (state.repairDraftColdRows && state.repairDraftColdRows[caseId]) {
     delete state.repairDraftColdRows[caseId];
@@ -924,6 +1043,223 @@ async function deleteColdCheckRowInline(caseId, rowIdx, event) {
 
   await patchRepairCaseInline(caseId, { cold_check_json: nextRows }, 'cold', { rollback });
   showToast(isEn ? 'Removed cold check row' : 'Đã xóa dòng đo nguội', 'success');
+}
+
+function _readCapGridFromDom(rowIdx) {
+  const grid = document.querySelector(`#repair-detail .cc-cap-grid[data-cc-idx="${rowIdx}"]`);
+  if (!grid) return null;
+  const rows = [];
+  grid.querySelectorAll('.cc-cap-row').forEach((el, idx) => {
+    const spec = String(el.querySelector('.cc-cap-spec')?.value || '').trim();
+    const capVal = String(el.querySelector('.cc-cap-val')?.value || '').trim();
+    const unitBtn = el.querySelector('.cc-cap-unit-btn');
+    const capUnit = String(unitBtn?.dataset?.capUnit || unitBtn?.textContent || 'µF').trim() || 'µF';
+    const esrVal = String(el.querySelector('.cc-cap-esr')?.value || '').trim();
+    const note = String(el.querySelector('.cc-cap-note')?.value || '').trim();
+    const rawId = String(el.dataset.capId || '').trim();
+    if (!spec && !capVal && !esrVal && !note) return;
+    rows.push({
+      id: rawId || `cap-${rows.length + 1}`,
+      spec,
+      cap_val: capVal,
+      cap_unit: window.MRLCoreStore?.normalizeCapUnit ? window.MRLCoreStore.normalizeCapUnit(capUnit) : capUnit,
+      esr_val: esrVal,
+      note,
+    });
+  });
+  return rows.map((r, i) => ({ ...r, id: `cap-${i + 1}` }));
+}
+
+function _capArraysEqual(a, b) {
+  const na = (a || []).map((x) => ({
+    spec: String(x.spec || '').trim(),
+    cap_val: String(x.cap_val || '').trim(),
+    cap_unit: String(x.cap_unit || 'µF').trim() || 'µF',
+    esr_val: String(x.esr_val || '').trim(),
+    note: String(x.note || '').trim(),
+  }));
+  const nb = (b || []).map((x) => ({
+    spec: String(x.spec || '').trim(),
+    cap_val: String(x.cap_val || '').trim(),
+    cap_unit: String(x.cap_unit || 'µF').trim() || 'µF',
+    esr_val: String(x.esr_val || '').trim(),
+    note: String(x.note || '').trim(),
+  }));
+  return JSON.stringify(na) === JSON.stringify(nb);
+}
+
+async function _commitCapGridForRow(caseId, rowIdx, opts = {}) {
+  const c = _getRepairCaseById(caseId);
+  if (!c) return false;
+  const domCaps = _readCapGridFromDom(rowIdx);
+  if (domCaps === null) return false;
+
+  const displayRows = _getDisplayColdRowsForCase(c);
+  const targetRow = displayRows[rowIdx];
+  if (!targetRow) return false;
+  const prevCaps = _getCapsForRow(targetRow);
+  if (!opts.force && _capArraysEqual(domCaps, prevCaps)) {
+    return false;
+  }
+
+  const pane = document.getElementById('repair-detail');
+  const savedScroll = pane ? pane.scrollTop : 0;
+  const rollback = _cloneRepairBackup(c);
+
+  const syncedResult = _serializeCapsJS(domCaps);
+  const nextRows = displayRows
+    .map((r, i) => {
+      if (i !== rowIdx) return _preserveColdRowForPayload(r, i);
+      return {
+        ..._preserveColdRowForPayload(r, i),
+        caps: domCaps,
+        result: syncedResult,
+      };
+    })
+    .filter((r) => String(r.item || '').trim() || String(r.result || '').trim() || (Array.isArray(r.caps) && r.caps.length > 0))
+    .map((r, i) => _preserveColdRowForPayload(r, i));
+
+  if (state.repairDraftColdRows && state.repairDraftColdRows[caseId]) {
+    delete state.repairDraftColdRows[caseId];
+  }
+  c.cold_check_json = nextRows;
+  c.cold_check_raw = _serializeColdCheckRowsJS(nextRows);
+
+  if (opts.reRenderGrid) {
+    const cellHost = document.querySelector(`#repair-detail .cc-cell-caps[data-cc-idx="${rowIdx}"] .cc-cap-grid`);
+    if (cellHost) {
+      const cid = escapeHtml(caseId);
+      const isEn = _repairIsEnLang();
+      cellHost.innerHTML = domCaps.map((cap, ci) => _renderCapGridRowHtml(cid, rowIdx, cap, ci, true, isEn)).join('');
+    }
+  }
+  if (pane) pane.scrollTop = savedScroll;
+
+  await patchRepairCaseInline(
+    caseId,
+    { cold_check_json: nextRows },
+    'cold',
+    { rollback, skipColdCapRerender: true }
+  );
+  return true;
+}
+
+function addCapRowInline(caseId, rowIdx, insertAfterIdx = null, autoFocus = true) {
+  const pane = document.getElementById('repair-detail');
+  const savedScroll = pane ? pane.scrollTop : 0;
+  const grid = document.querySelector(`#repair-detail .cc-cap-grid[data-cc-idx="${rowIdx}"]`);
+  if (!grid) return;
+
+  const cid = escapeHtml(caseId);
+  const isEn = _repairIsEnLang();
+  const existingRows = Array.from(grid.querySelectorAll('.cc-cap-row'));
+  const nextCapIdx = typeof insertAfterIdx === 'number'
+    ? Math.max(0, Math.min(insertAfterIdx + 1, existingRows.length))
+    : existingRows.length;
+
+  const blankCap = { id: `cap-${existingRows.length + 1}`, spec: '', cap_val: '', cap_unit: 'µF', esr_val: '', note: '' };
+  const tmp = document.createElement('div');
+  tmp.innerHTML = _renderCapGridRowHtml(cid, rowIdx, blankCap, nextCapIdx, true, isEn).trim();
+  const newEl = tmp.firstElementChild;
+  if (!newEl) return;
+
+  if (nextCapIdx < existingRows.length) {
+    grid.insertBefore(newEl, existingRows[nextCapIdx]);
+  } else {
+    grid.appendChild(newEl);
+  }
+  _reindexCapDomRows(grid, caseId, rowIdx);
+
+  if (pane) pane.scrollTop = savedScroll;
+  if (autoFocus) {
+    const specInp = newEl.querySelector('.cc-cap-spec');
+    if (specInp) {
+      specInp.focus({ preventScroll: true });
+      if (pane) pane.scrollTop = savedScroll;
+    }
+  }
+}
+
+function _reindexCapDomRows(grid, caseId, ccIdx) {
+  if (!grid) return;
+  const cid = escapeHtml(caseId);
+  grid.querySelectorAll('.cc-cap-row').forEach((rowEl, ci) => {
+    rowEl.dataset.capIdx = String(ci);
+    rowEl.querySelector('.cc-cap-spec')?.setAttribute('onkeydown', `onCapInputKeydown(event, '${cid}', ${ccIdx}, ${ci}, 'spec')`);
+    rowEl.querySelector('.cc-cap-val')?.setAttribute('onkeydown', `onCapInputKeydown(event, '${cid}', ${ccIdx}, ${ci}, 'cap_val')`);
+    rowEl.querySelector('.cc-cap-esr')?.setAttribute('onkeydown', `onCapInputKeydown(event, '${cid}', ${ccIdx}, ${ci}, 'esr_val')`);
+    rowEl.querySelector('.cc-cap-note')?.setAttribute('onkeydown', `onCapInputKeydown(event, '${cid}', ${ccIdx}, ${ci}, 'note')`);
+    rowEl.querySelector('.cc-cap-unit-btn')?.setAttribute('onclick', `cycleCapRowUnitInline('${cid}', ${ccIdx}, ${ci}, this, event)`);
+    rowEl.querySelector('.cc-cap-del-btn')?.setAttribute('onclick', `deleteCapRowInline('${cid}', ${ccIdx}, ${ci}, event)`);
+  });
+}
+
+async function cycleCapRowUnitInline(caseId, rowIdx, capIdx, btnEl, event) {
+  if (event) event.stopPropagation();
+  const units = ['µF', 'mF', 'nF'];
+  const cur = String(btnEl?.dataset?.capUnit || btnEl?.textContent || 'µF').trim();
+  const curPos = Math.max(0, units.indexOf(cur));
+  const next = units[(curPos + 1) % units.length];
+  if (btnEl) {
+    btnEl.dataset.capUnit = next;
+    btnEl.textContent = next;
+  }
+  await _commitCapGridForRow(caseId, rowIdx, { force: true });
+}
+
+async function deleteCapRowInline(caseId, rowIdx, capIdx, event) {
+  if (event) event.stopPropagation();
+  const pane = document.getElementById('repair-detail');
+  const savedScroll = pane ? pane.scrollTop : 0;
+  const grid = document.querySelector(`#repair-detail .cc-cap-grid[data-cc-idx="${rowIdx}"]`);
+  if (!grid) return;
+  const rows = Array.from(grid.querySelectorAll('.cc-cap-row'));
+  const targetEl = rows[capIdx];
+  if (targetEl) targetEl.remove();
+  _reindexCapDomRows(grid, caseId, rowIdx);
+  if (pane) pane.scrollTop = savedScroll;
+  await _commitCapGridForRow(caseId, rowIdx, { force: true, reRenderGrid: true });
+}
+
+async function onCapInputKeydown(event, caseId, rowIdx, capIdx, field) {
+  if (!event) return;
+  if (event.key === 'Escape') {
+    event.stopPropagation();
+    event.target?.blur();
+    return;
+  }
+  if (event.key === 'Enter' && (field === 'esr_val' || field === 'note')) {
+    event.preventDefault();
+    event.stopPropagation();
+    const curRowEl = event.target?.closest('.cc-cap-row');
+    const grid = curRowEl?.closest('.cc-cap-grid');
+    const actualCapIdx = grid ? Array.from(grid.querySelectorAll('.cc-cap-row')).indexOf(curRowEl) : capIdx;
+    const commitPromise = _commitCapGridForRow(caseId, rowIdx);
+    addCapRowInline(caseId, rowIdx, actualCapIdx, true);
+    await commitPromise;
+  }
+}
+
+function onCapInputBlur(event, caseId, rowIdx) {
+  setTimeout(() => {
+    const active = document.activeElement;
+    const curGrid = document.querySelector(`#repair-detail .cc-cap-grid[data-cc-idx="${rowIdx}"]`);
+    if (!curGrid) return;
+    // Always auto-save changes smoothly without losing focus/scroll
+    _commitCapGridForRow(caseId, rowIdx);
+  }, 15);
+}
+
+function _focusCapGridFirstInput(caseId, rowIdx) {
+  const grid = document.querySelector(`#repair-detail .cc-cap-grid[data-cc-idx="${rowIdx}"]`);
+  if (!grid) return false;
+  const firstSpec = grid.querySelector('.cc-cap-row .cc-cap-spec');
+  if (firstSpec) {
+    firstSpec.focus({ preventScroll: true });
+    return true;
+  }
+  addCapRowInline(caseId, rowIdx, null, true);
+  return true;
 }
 
 async function startRepairTitleEdit(caseId) {
@@ -1034,8 +1370,16 @@ function cancelActiveRepairInlineEdit() {
   return true;
 }
 
-function flushActiveRepairInlineEdit() {
+async function flushActiveRepairInlineEdit() {
   if (state.repairTagAdd) closeRepairTagInput();
+  const activeCap = document.activeElement?.closest?.('#repair-detail .cc-cap-grid');
+  if (activeCap) {
+    const ccIdx = Number(activeCap.dataset.ccIdx);
+    const rootId = activeCap.closest('[data-repair-detail-id]')?.dataset?.repairDetailId || state.selectedRepairId;
+    if (rootId && Number.isFinite(ccIdx)) {
+      await _commitCapGridForRow(rootId, ccIdx);
+    }
+  }
   if (state.repairInlineEdit) return commitActiveRepairInlineEdit();
   return Promise.resolve();
 }
@@ -1045,7 +1389,10 @@ function _cloneRepairBackup(c) {
   return {
     brand_model: c.brand_model || '',
     cold_check_raw: c.cold_check_raw || '',
-    cold_check_json: _resolveColdCheckRowsForCase(c).map((r) => ({ ...r })),
+    cold_check_json: _resolveColdCheckRowsForCase(c).map((r) => ({
+      ...r,
+      ...(Array.isArray(r.caps) ? { caps: _cloneCapItemsJS(r.caps) } : {}),
+    })),
     note: c.note || '',
     fault_symptom_raw: c.fault_symptom_raw || '',
     root_cause_raw: c.root_cause_raw || '',
@@ -1061,7 +1408,10 @@ function _applyRepairBackup(c, backup) {
   Object.assign(c, {
     brand_model: backup.brand_model,
     cold_check_raw: backup.cold_check_raw,
-    cold_check_json: (backup.cold_check_json || []).map((r) => ({ ...r })),
+    cold_check_json: (backup.cold_check_json || []).map((r) => ({
+      ...r,
+      ...(Array.isArray(r.caps) ? { caps: _cloneCapItemsJS(r.caps) } : {}),
+    })),
     note: backup.note,
     fault_symptom_raw: backup.fault_symptom_raw,
     root_cause_raw: backup.root_cause_raw,
@@ -1133,23 +1483,23 @@ async function commitActiveRepairInlineEdit(options = {}) {
     const updatedRows = displayRows
       .map((r, i) => {
         if (i !== ed.rowIdx) return r;
-        return { ...r, [ed.field]: nextVal };
+        const patched = { ...r, [ed.field]: nextVal };
+        if (ed.field === 'item' && _isCapRowJS(patched) && !Array.isArray(patched.caps)) {
+          patched.caps = patched.result ? _getCapsForRow(patched) : [];
+        }
+        return patched;
       })
-      .filter((r) => String(r.item || '').trim() || String(r.result || '').trim())
-      .map((r, i) => ({
-        id: r.id && !String(r.id).startsWith('cc-draft-') ? r.id : `cc-${i + 1}`,
-        item: String(r.item || '').trim(),
-        result: String(r.result || '').trim(),
-        status: r.status || 'none',
-      }));
+      .filter((r) => String(r.item || '').trim() || String(r.result || '').trim() || (Array.isArray(r.caps) && r.caps.length > 0))
+      .map((r, i) => _preserveColdRowForPayload(r, i));
 
     if (state.repairDraftColdRows && state.repairDraftColdRows[ed.caseId]) {
       delete state.repairDraftColdRows[ed.caseId];
     }
+    const becomesCapRow = ed.field === 'item' && Boolean(updatedRows[ed.rowIdx] && _isCapRowJS(updatedRows[ed.rowIdx]));
     c.cold_check_json = updatedRows;
     c.cold_check_raw = _serializeColdCheckRowsJS(updatedRows);
 
-    if (targetRow._isDraft || bothEmpty) {
+    if (targetRow._isDraft || bothEmpty || becomesCapRow) {
       const coldHost = document.querySelector('#repair-detail .rep-cold-host');
       if (coldHost) coldHost.innerHTML = renderRepairColdCheckBlockHtml(c, true);
     } else {
@@ -1160,7 +1510,11 @@ async function commitActiveRepairInlineEdit(options = {}) {
     const patchPromise = patchRepairCaseInline(ed.caseId, { cold_check_json: updatedRows }, 'cold', { rollback });
     if (options.nextCell) {
       const targetIdx = Math.min(options.nextCell.rowIdx, Math.max(0, updatedRows.length - 1));
-      await startColdCheckCellEdit(options.nextCell.caseId, targetIdx, options.nextCell.field);
+      if (options.nextCell.field === 'result' && updatedRows[targetIdx] && _isCapRowJS(updatedRows[targetIdx])) {
+        _focusCapGridFirstInput(options.nextCell.caseId, targetIdx);
+      } else {
+        await startColdCheckCellEdit(options.nextCell.caseId, targetIdx, options.nextCell.field);
+      }
     } else if (options.addRowAfter) {
       const insIdx = bothEmpty
         ? Math.min(options.addRowAfter.afterIdx, updatedRows.length)
@@ -1266,14 +1620,15 @@ function _syncRepairDetailBlocksAfterPatch(saved, opts = {}) {
 
   const coldHost = root.querySelector('.rep-cold-host');
   if (coldHost) {
-    if (ed && ed.caseId === saved.id && ed.target === 'cold-cell') {
+    const activeCapEditing = Boolean(opts.skipColdCapRerender || document.activeElement?.closest('#repair-detail .cc-cap-grid'));
+    if ((ed && ed.caseId === saved.id && ed.target === 'cold-cell') || activeCapEditing) {
       const displayRows = _getDisplayColdRowsForCase(saved);
       const isEn = _repairIsEnLang();
       const countMetaEl = coldHost.querySelector('.cc-count-meta');
       if (countMetaEl) countMetaEl.innerHTML = _coldCheckCountMetaHtml(displayRows, isEn);
       displayRows.forEach((r, idx) => {
         ['item', 'result'].forEach((fld) => {
-          if (ed.rowIdx === idx && ed.field === fld) return;
+          if (ed && ed.rowIdx === idx && ed.field === fld) return;
           const cell = coldHost.querySelector(`.cc-cell[data-cc-idx="${idx}"][data-cc-field="${fld}"]`);
           if (cell) {
             const ph = fld === 'item'
@@ -1722,38 +2077,60 @@ function renderKnowledgeSopListInnerHtml(k, inline = true) {
   }).join('');
 }
 
+function _knwBlockEditBtnHtml(kid, field, isEn) {
+  return `<button type="button" class="btn btn-sm sec-inline-edit-btn" data-no-i18n="1" onclick="event.stopPropagation(); startUniFieldEdit('knowledge', '${kid}', '${field}', null, { skipGuard: true })" title="${isEn ? 'Edit this block' : 'Chỉnh sửa khối nội dung này'}">${isEn ? '✎ Edit' : '✎ Sửa'}</button>`;
+}
+
 function buildKnowledgeDetailHtml(k, opts = {}) {
   const { showNav = true, currentIdx = 0, total = 1, showDropzone = true, codePrefix = '', pane = 'primary', inline = true } = opts;
   const sopMode = isSopCategory(k.category);
   const kid = escapeHtml(k.id);
+  const isEn = typeof state !== 'undefined' && state.appLang === 'en';
+  const enOv = (isEn && k.en_overrides_json && typeof k.en_overrides_json === 'object') ? k.en_overrides_json : {};
+  const fieldVal = (fld) => {
+    const ov = String(enOv[fld] || '').trim();
+    return ov ? { val: ov, customEn: true } : { val: String(k[fld] || ''), customEn: false };
+  };
+  const customAttr = (isCustomEn) => (isCustomEn ? 'data-has-custom-en="1" data-no-i18n="1"' : '');
   const hl = (t) => highlightTagsHtml(String(t || '').trim(), k.component_tags);
-  const uniAttrs = (field, singleLine = false) => inline
-    ? `data-uni-edit="1" data-uni-kind="knowledge" data-uni-id="${kid}" data-uni-field="${field}" onclick="startUniFieldEdit('knowledge', '${kid}', '${field}', event, { singleLine: ${singleLine} })"`
-    : '';
+  const uniAttrs = (field, singleLine = false, isCustomEn = false) => inline
+    ? `data-uni-edit="1" data-uni-kind="knowledge" data-uni-id="${kid}" data-uni-field="${field}" ${customAttr(isCustomEn)} onclick="startUniFieldEdit('knowledge', '${kid}', '${field}', event, { singleLine: ${singleLine} })"`
+    : customAttr(isCustomEn);
   const uniCls = inline ? 'uni-editable' : '';
+  const editBtnFor = (field) => (inline ? _knwBlockEditBtnHtml(kid, field, isEn) : '');
   let body = '';
 
+  const coreF = fieldVal('core_concept_workflow');
+  const appF = fieldVal('actionable_application');
+  const whyF = fieldVal('why_question');
+  const keyF = fieldVal('key_takeaway');
+  const noteF = fieldVal('note');
+  const topicF = fieldVal('topic_model');
+
   if (sopMode) {
-    const steps = parseSopSteps(k.core_concept_workflow);
+    const steps = parseSopSteps(coreF.val || k.core_concept_workflow);
     const done = steps.filter((_, i) => state.sopChecked[`${k.id}:${i}`]).length;
     body = `
       <div class="sec">
-        <div class="sec-head">
+        <div class="sec-head sec-title-row">
           <span class="sec-title">QUY TRÌNH ĐO &amp; SỬA (SOP)</span>
-          <span class="sop-count">${done} / ${steps.length} HOÀN THÀNH</span>
+          <div class="sec-head-ops" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            <span class="sop-count">${done} / ${steps.length} HOÀN THÀNH</span>
+            ${editBtnFor('core_concept_workflow')}
+          </div>
         </div>
-        <div class="${uniCls}" ${uniAttrs('core_concept_workflow', false)}>${renderKnowledgeSopListInnerHtml(k, inline)}</div>
+        <div class="${uniCls}" ${uniAttrs('core_concept_workflow', false, coreF.customEn)}>${renderKnowledgeSopListInnerHtml({ ...k, core_concept_workflow: coreF.val }, inline)}</div>
       </div>
-      ${(k.actionable_application || inline) ? `<div class="sec"><div class="note-block accent"><div class="nb-title">ỨNG DỤNG THỰC CHIẾN</div><div class="nb-body ${uniCls}" ${uniAttrs('actionable_application', false)}>${k.actionable_application ? hl(k.actionable_application) : '<span class="none">— Chưa có (chạm để nhập) —</span>'}</div></div></div>` : ''}`;
+      ${(appF.val || inline) ? `<div class="sec"><div class="note-block accent"><div class="nb-title sec-title-row"><span>ỨNG DỤNG THỰC CHIẾN</span><div class="sec-head-ops">${editBtnFor('actionable_application')}</div></div><div class="nb-body ${uniCls}" ${uniAttrs('actionable_application', false, appF.customEn)}>${appF.val ? hl(appF.val) : `<span class="none">${isEn ? '— Empty (click to add) —' : '— Chưa có (chạm để nhập) —'}</span>`}</div></div></div>` : ''}`;
   } else {
     body = `
-      ${(k.core_concept_workflow || inline) ? `<div class="sec"><div class="sec-head"><span class="sec-title">BẢN CHẤT NGUYÊN LÝ</span></div><div class="nb-body ${uniCls}" ${uniAttrs('core_concept_workflow', false)}>${k.core_concept_workflow ? hl(k.core_concept_workflow) : '<span class="none">— Chưa có (chạm để nhập) —</span>'}</div></div>` : ''}
-      ${(k.why_question || k.source_group === 'Automation') ? `
+      ${(coreF.val || inline) ? `<div class="sec"><div class="sec-head sec-title-row"><span class="sec-title">BẢN CHẤT NGUYÊN LÝ</span><div class="sec-head-ops">${editBtnFor('core_concept_workflow')}</div></div><div class="nb-body ${uniCls}" ${uniAttrs('core_concept_workflow', false, coreF.customEn)}>${coreF.val ? hl(coreF.val) : `<span class="none">${isEn ? '— Empty (click to add) —' : '— Chưa có (chạm để nhập) —'}</span>`}</div></div>` : ''}
+      ${(whyF.val || k.source_group === 'Automation') ? `
         <div class="sec"><div class="grid2">
-          <div class="note-block why"><div class="nb-title">CÂU HỎI PHẢN BIỆN (TẠI SAO?)</div><div class="nb-body ${uniCls}" ${uniAttrs('why_question', false)}>${k.why_question ? hl(k.why_question) : '<span class="none">— Chưa có (chạm để nhập) —</span>'}</div></div>
-          <div class="note-block ans"><div class="nb-title">TRẢ LỜI THỰC CHIẾN &amp; GIẢI PHÁP</div><div class="nb-body ${uniCls}" ${uniAttrs('actionable_application', false)}>${k.actionable_application ? hl(k.actionable_application) : '<span class="none">— Chưa có (chạm để nhập) —</span>'}</div></div>
+          <div class="note-block why"><div class="nb-title sec-title-row"><span>CÂU HỎI PHẢN BIỆN (TẠI SAO?)</span><div class="sec-head-ops">${editBtnFor('why_question')}</div></div><div class="nb-body ${uniCls}" ${uniAttrs('why_question', false, whyF.customEn)}>${whyF.val ? hl(whyF.val) : `<span class="none">${isEn ? '— Empty (click to add) —' : '— Chưa có (chạm để nhập) —'}</span>`}</div></div>
+          <div class="note-block ans"><div class="nb-title sec-title-row"><span>TRẢ LỜI THỰC CHIẾN &amp; GIẢI PHÁP</span><div class="sec-head-ops">${editBtnFor('actionable_application')}</div></div><div class="nb-body ${uniCls}" ${uniAttrs('actionable_application', false, appF.customEn)}>${appF.val ? hl(appF.val) : `<span class="none">${isEn ? '— Empty (click to add) —' : '— Chưa có (chạm để nhập) —'}</span>`}</div></div>
         </div></div>`
-        : `<div class="sec"><div class="note-block accent"><div class="nb-title">ỨNG DỤNG THỰC CHIẾN</div><div class="nb-body ${uniCls}" ${uniAttrs('actionable_application', false)}>${k.actionable_application ? hl(k.actionable_application) : '<span class="none">— Chưa có (chạm để nhập) —</span>'}</div></div></div>`}`;
+        : `<div class="sec"><div class="note-block accent"><div class="nb-title sec-title-row"><span>ỨNG DỤNG THỰC CHIẾN</span><div class="sec-head-ops">${editBtnFor('actionable_application')}</div></div><div class="nb-body ${uniCls}" ${uniAttrs('actionable_application', false, appF.customEn)}>${appF.val ? hl(appF.val) : `<span class="none">${isEn ? '— Empty (click to add) —' : '— Chưa có (chạm để nhập) —'}</span>`}</div></div></div>`}`;
   }
 
   return `
@@ -1768,7 +2145,7 @@ function buildKnowledgeDetailHtml(k, opts = {}) {
             <span>${escapeHtml(k.record_date || '----------')}</span>
             ${ledHtml(k.status_code)}
           </div>
-          <div class="d-title ${inline ? 'uni-editable uni-editable-title' : ''}" ${uniAttrs('topic_model', true)}>${escapeHtml(k.topic_model)}</div>
+          <div class="d-title ${inline ? 'uni-editable uni-editable-title' : ''}" ${uniAttrs('topic_model', true, topicF.customEn)}>${escapeHtml(topicF.val)}</div>
           <div class="tags">${renderTagPills(k.component_tags, []) || '<span class="mono" style="font-size:12px;color:var(--text-3);">CHƯA GẮN MÃ</span>'}</div>
         </div>
         <div class="d-controls">
@@ -1781,10 +2158,10 @@ function buildKnowledgeDetailHtml(k, opts = {}) {
         </div>
       </div>
 
-      ${k.key_takeaway ? `<div class="note-block accent"><div class="nb-title">TỪ KHÓA LÕI</div><div class="nb-body ${uniCls}" style="font-weight:500;" ${uniAttrs('key_takeaway', false)}>${hl(k.key_takeaway)}</div></div>` : ''}
+      ${keyF.val ? `<div class="sec"><div class="note-block accent"><div class="nb-title sec-title-row"><span>TỪ KHÓA LÕI</span><div class="sec-head-ops">${editBtnFor('key_takeaway')}</div></div><div class="nb-body ${uniCls}" style="font-weight:500;" ${uniAttrs('key_takeaway', false, keyF.customEn)}>${hl(keyF.val)}</div></div></div>` : ''}
       <div id="knowledge-bilingual-host-${kid}" class="bilingual-sec-wrap hidden"></div>
       ${body}
-      ${k.note ? `<div class="sec"><div class="warn safety"><div class="warn-title"><span>LƯU Ý AN TOÀN &amp; THỰC HÀNH</span></div><div class="warn-body ${uniCls}" ${uniAttrs('note', false)}>${hl(k.note)}</div></div></div>` : ''}
+      ${noteF.val ? `<div class="sec"><div class="warn safety"><div class="warn-title sec-title-row"><span>LƯU Ý AN TOÀN &amp; THỰC HÀNH</span><div class="sec-head-ops">${editBtnFor('note')}</div></div><div class="warn-body ${uniCls}" ${uniAttrs('note', false, noteF.customEn)}>${hl(noteF.val)}</div></div></div>` : ''}
       ${renderCustomSectionsHtml(k.custom_sections_json || [], `${codePrefix}knw:${k.id}`, k.component_tags || [], inline ? { kind: 'knowledge', id: k.id, pane } : null)}
       ${renderAttachmentSection('knowledge', k.id, k.attachments || [], showDropzone)}
     </div>`;

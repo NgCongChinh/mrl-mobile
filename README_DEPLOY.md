@@ -1,7 +1,7 @@
 # NC38 — Standalone Mobile PWA (`mobile_dist/`)
 
-- **Build ID:** `20261121151719`
-- **Bundled Records:** `86` records + `57` SRS cards
+- **Build ID:** `20261122043453`
+- **Bundled Records:** `88` records + `57` SRS cards
 
 ## Cách xuất bản để dùng độc lập mọi nơi khi tắt máy tính
 1. **GitHub Pages:** Đẩy toàn bộ nội dung thư mục `mobile_dist/` lên branch `gh-pages` hoặc thư mục `/docs` của repo GitHub.

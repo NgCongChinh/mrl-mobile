@@ -2786,4 +2786,96 @@
     opacity: 1 !important;
     padding: 4px 8px !important;
   }
+  .cc-td-caps {
+    padding: 4px 0 0 !important;
+    width: 100% !important;
+  }
+  .cc-cell-caps {
+    padding: 2px 0 !important;
+    width: 100% !important;
+    overflow-x: hidden !important;
+  }
+  .cc-cap-row {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) 28px !important;
+    grid-template-areas:
+      "spec del"
+      "meas meas" !important;
+    gap: 4px 6px !important;
+    padding: 6px 2px !important;
+    align-items: center !important;
+  }
+  .cc-cap-row.readonly {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-areas:
+      "spec"
+      "meas" !important;
+  }
+  .cc-cap-spec {
+    font-size: 13.5px !important;
+    padding: 4px 6px !important;
+  }
+  .cc-cap-meas-col {
+    flex-wrap: wrap !important;
+    gap: 4px 5px !important;
+    padding-left: 2px !important;
+  }
+  .cc-cap-val {
+    width: 48px !important;
+    font-size: 13px !important;
+    padding: 4px 4px !important;
+  }
+  .cc-cap-unit-btn {
+    min-height: 26px !important;
+    padding: 2px 6px !important;
+    font-size: 11.5px !important;
+  }
+  .cc-cap-esr {
+    width: 46px !important;
+    font-size: 13px !important;
+    padding: 4px 4px !important;
+  }
+  .cc-cap-note {
+    flex: 1 1 60px !important;
+    min-width: 60px !important;
+    font-size: 12.5px !important;
+    padding: 4px 5px !important;
+  }
+  .cc-cap-del-btn {
+    opacity: 0.9 !important;
+    width: 28px !important;
+    height: 28px !important;
+    font-size: 17px !important;
+  }
+  .cc-cap-add-btn {
+    min-height: 30px !important;
+    padding: 4px 12px !important;
+    font-size: 12.5px !important;
+  }
+  .rep-modal-cap-row {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 4px !important;
+    padding: 6px 0 !important;
+    border-bottom: 1px solid var(--line);
+  }
+  .sec-inline-edit-btn {
+    opacity: 1 !important;
+    min-height: 26px !important;
+    padding: 3px 9px !important;
+    font-size: 12px !important;
+  }
+  .uni-inline-bar {
+    gap: 6px !important;
+  }
+  .uni-inline-bar-btns {
+    width: 100% !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 6px !important;
+  }
+  .uni-inline-bar-btns .btn {
+    min-height: 36px !important;
+    justify-content: center !important;
+    font-size: 13px !important;
+  }
 }
