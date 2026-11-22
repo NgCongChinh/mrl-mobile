@@ -26,6 +26,7 @@ function applyBootstrapData(data, preserveSelection = true) {
   if (Array.isArray(data.en_vocabulary)) state.enVocabulary = data.en_vocabulary;
   else if (state.englishVocab.length) state.enVocabulary = state.englishVocab;
   if (typeof syncEnUiState === 'function') syncEnUiState();
+  if (typeof _syncAiKeyButtons === 'function') _syncAiKeyButtons();
   const cardSource = state.englishCards.length ? state.englishCards : state.englishVocab;
   if (!preserveSelection || !cardSource.some((v) => String(v.id) === String(state.selectedEnglishVocabId))) {
     state.selectedEnglishVocabId = cardSource.length ? cardSource[0].id : null;
@@ -404,8 +405,341 @@ function renderPortalScreen() {
   if (typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
 }
 
+function _getWorkspaceScrollEl(ws, tab) {
+  if (tab === 'repairs') return document.getElementById('repair-detail');
+  if (tab === 'knowledge') return document.getElementById('knowledge-detail');
+  if (tab === 'plc') return document.getElementById('plc-detail');
+  if (tab === 'network') return document.getElementById('network-detail');
+  if (tab === 'flashcards') return document.querySelector('#view-flashcards .scroll-view');
+  if (tab === 'dictionary') return document.getElementById('view-dictionary');
+  if (tab === 'scratchpad') return document.querySelector('#view-scratchpad .scratchpad-wrap');
+  if (tab === 'en-quiz') return document.getElementById('view-en-quiz');
+  if (tab === 'en-coach') return document.getElementById('view-en-coach');
+  if (tab === 'en-vocab-bank') return document.getElementById('en-bank-detail');
+  return null;
+}
+
+function _getWorkspaceListEl(ws, tab) {
+  if (tab === 'repairs') return document.getElementById('repair-list');
+  if (tab === 'knowledge') return document.getElementById('knowledge-list');
+  if (tab === 'plc') return document.getElementById('plc-list');
+  if (tab === 'network') return document.getElementById('network-list');
+  if (tab === 'en-vocab-bank') return document.getElementById('en-vocab-bank-list');
+  return null;
+}
+
+function saveWorkspaceMemory(ws) {
+  if (!ws || !WORKSPACE_META[ws]) return null;
+  if (!state.workspaceMemory) state.workspaceMemory = {};
+  if (typeof flushPendingDrillDraft === 'function') flushPendingDrillDraft();
+  const prev = state.workspaceMemory[ws] || {};
+  const isCurrent = state.activeWorkspace === ws;
+  const curTab = isCurrent ? state.activeTab : (prev.activeTab || WORKSPACE_META[ws].defaultTab);
+  const mem = {
+    ...prev,
+    activeTab: curTab,
+    scrollTop: isCurrent ? (_getWorkspaceScrollEl(ws, curTab)?.scrollTop || 0) : (prev.scrollTop || 0),
+    listScrollTop: isCurrent ? (_getWorkspaceListEl(ws, curTab)?.scrollTop || 0) : (prev.listScrollTop || 0),
+  };
+
+  if (ws === 'mrl') {
+    mem.repairFilters = { ...state.repairFilters };
+    mem.knowledgeFilters = { ...state.knowledgeFilters };
+    mem.selectedRepairId = state.selectedRepairId;
+    mem.selectedKnowledgeId = state.selectedKnowledgeId;
+    mem.repairsListCollapsed = state.repairsListCollapsed;
+    mem.knowledgeListCollapsed = state.knowledgeListCollapsed;
+  } else if (ws === 'plc') {
+    mem.plcFilters = { ...state.plcFilters };
+    mem.selectedPlcId = state.selectedPlcId;
+    mem.plcListCollapsed = state.plcListCollapsed;
+  } else if (ws === 'network') {
+    mem.networkFilters = { ...state.networkFilters };
+    mem.selectedNetworkId = state.selectedNetworkId;
+    mem.networkListCollapsed = state.networkListCollapsed;
+  } else if (ws === 'english') {
+    mem.enBankFilters = { ...state.enBankFilters };
+    mem.selectedEnglishVocabId = state.selectedEnglishVocabId;
+    mem.enBankListCollapsed = state.enBankListCollapsed;
+    mem.enCoachMode = state.enCoach.mode;
+    mem.enQuizState = {
+      studyMode: state.openQuiz.studyMode,
+      srsFilter: state.openQuiz.srsFilter,
+      cardIdx: state.openQuiz.cardIdx,
+      cardFlipped: state.openQuiz.cardFlipped,
+      categoryFilter: state.openQuiz.categoryFilter,
+      index: state.openQuiz.index,
+    };
+  }
+
+  if (isCurrent && curTab === 'flashcards' && typeof saveCurrentDrillSession === 'function') {
+    const snap = saveCurrentDrillSession();
+    if (snap) {
+      mem.lastDrillKey = snap.key;
+      mem.drillSnapshot = snap;
+    }
+  }
+  state.workspaceMemory[ws] = mem;
+  return mem;
+}
+
+function _applyWorkspaceFilterDom(ws) {
+  if (ws === 'mrl') {
+    const rs = document.getElementById('repair-status-filter');
+    if (rs) rs.value = state.repairFilters.status || 'ALL';
+    const rq = document.getElementById('repair-search-input');
+    if (rq) rq.value = state.repairFilters.q || '';
+    document.getElementById('repair-search-clear')?.classList.toggle('hidden', !state.repairFilters.q);
+    const kc = document.getElementById('knowledge-category-filter');
+    if (kc) kc.value = state.knowledgeFilters.category || 'ALL';
+    const ks = document.getElementById('knowledge-status-filter');
+    if (ks) ks.value = state.knowledgeFilters.status || 'ALL';
+    const kq = document.getElementById('knowledge-search-input');
+    if (kq) kq.value = state.knowledgeFilters.q || '';
+    document.getElementById('knowledge-search-clear')?.classList.toggle('hidden', !state.knowledgeFilters.q);
+  } else if (ws === 'plc') {
+    const ps = document.getElementById('plc-status-filter');
+    if (ps) ps.value = state.plcFilters.status || 'ALL';
+    const pq = document.getElementById('plc-search-input');
+    if (pq) pq.value = state.plcFilters.q || '';
+    document.getElementById('plc-search-clear')?.classList.toggle('hidden', !state.plcFilters.q);
+  } else if (ws === 'network') {
+    const ns = document.getElementById('network-status-filter');
+    if (ns) ns.value = state.networkFilters.status || 'ALL';
+    const nq = document.getElementById('network-search-input');
+    if (nq) nq.value = state.networkFilters.q || '';
+    document.getElementById('network-search-clear')?.classList.toggle('hidden', !state.networkFilters.q);
+  } else if (ws === 'english') {
+    const es = document.getElementById('en-bank-status-filter');
+    if (es) es.value = state.enBankFilters.status || 'ALL';
+    const eq = document.getElementById('en-bank-search-input');
+    if (eq) eq.value = state.enBankFilters.q || '';
+    document.getElementById('en-bank-search-clear')?.classList.toggle('hidden', !state.enBankFilters.q);
+  }
+}
+
+function _restoreWorkspaceMemoryFields(ws, mem, opts = {}) {
+  if (!mem) return;
+  if (ws === 'mrl') {
+    if (mem.repairFilters && !opts.skipFilters) state.repairFilters = { ...mem.repairFilters };
+    if (mem.knowledgeFilters && !opts.skipFilters) state.knowledgeFilters = { ...mem.knowledgeFilters };
+    if (opts.selectedId) {
+      if (mem.activeTab === 'knowledge') state.selectedKnowledgeId = opts.selectedId;
+      else state.selectedRepairId = opts.selectedId;
+    } else {
+      if (mem.selectedRepairId) state.selectedRepairId = mem.selectedRepairId;
+      if (mem.selectedKnowledgeId) state.selectedKnowledgeId = mem.selectedKnowledgeId;
+    }
+    if (typeof mem.repairsListCollapsed === 'boolean') state.repairsListCollapsed = mem.repairsListCollapsed;
+    if (typeof mem.knowledgeListCollapsed === 'boolean') state.knowledgeListCollapsed = mem.knowledgeListCollapsed;
+  } else if (ws === 'plc') {
+    if (mem.plcFilters && opts.plcCategory === undefined && !opts.skipFilters) state.plcFilters = { ...mem.plcFilters };
+    if (opts.selectedId) state.selectedPlcId = opts.selectedId;
+    else if (mem.selectedPlcId) state.selectedPlcId = mem.selectedPlcId;
+    if (typeof mem.plcListCollapsed === 'boolean' && opts.plcCategory === undefined) state.plcListCollapsed = mem.plcListCollapsed;
+  } else if (ws === 'network') {
+    if (mem.networkFilters && opts.netProtocol === undefined && !opts.skipFilters) state.networkFilters = { ...mem.networkFilters };
+    if (opts.selectedId) state.selectedNetworkId = opts.selectedId;
+    else if (mem.selectedNetworkId) state.selectedNetworkId = mem.selectedNetworkId;
+    if (typeof mem.networkListCollapsed === 'boolean' && opts.netProtocol === undefined) state.networkListCollapsed = mem.networkListCollapsed;
+  } else if (ws === 'english') {
+    if (mem.enBankFilters && opts.enCategory === undefined && !opts.skipFilters) state.enBankFilters = { ...mem.enBankFilters };
+    if (opts.selectedId) state.selectedEnglishVocabId = opts.selectedId;
+    else if (mem.selectedEnglishVocabId) state.selectedEnglishVocabId = mem.selectedEnglishVocabId;
+    if (typeof mem.enBankListCollapsed === 'boolean' && opts.enCategory === undefined) state.enBankListCollapsed = mem.enBankListCollapsed;
+    if (mem.enCoachMode && opts.coachMode === undefined) state.enCoach.mode = mem.enCoachMode;
+    if (mem.enQuizState) {
+      Object.assign(state.openQuiz, mem.enQuizState);
+    }
+  }
+  _applyWorkspaceFilterDom(ws);
+}
+
+// ---------------------------------------------------------------------------
+// IDE-style Navigation History (Lùi / Tiến Alt+← Alt+→ Mouse 4/5)
+// ---------------------------------------------------------------------------
+function _selectedItemIdFor(ws, section) {
+  if (section === 'repairs') return state.selectedRepairId || null;
+  if (section === 'knowledge') return state.selectedKnowledgeId || null;
+  if (section === 'plc') return state.selectedPlcId || null;
+  if (section === 'network') return state.selectedNetworkId || null;
+  if (section === 'en-vocab-bank') return state.selectedEnglishVocabId || null;
+  return null;
+}
+
+function captureNavSnapshot() {
+  if (!state.activeWorkspace) return null;
+  const ws = state.activeWorkspace;
+  const section = state.activeTab;
+  const p1 = typeof getPrimaryTargetMeta === 'function' ? getPrimaryTargetMeta() : null;
+  const itemId = _selectedItemIdFor(ws, section);
+  let drillState = null;
+  if (section === 'flashcards' && typeof saveCurrentDrillSession === 'function') {
+    drillState = saveCurrentDrillSession();
+  }
+  const label = p1 ? `${p1.badge}${p1.title ? ' · ' + p1.title : ''}` : section;
+  return {
+    workspace: ws,
+    section,
+    tabKey: p1?.key || `${section}:${ws}`,
+    itemId,
+    label,
+    drillState: drillState ? { ...drillState } : null,
+  };
+}
+
+function _sameNavContext(a, b) {
+  if (!a || !b) return false;
+  return (
+    a.workspace === b.workspace &&
+    a.section === b.section &&
+    a.tabKey === b.tabKey &&
+    String(a.itemId || '') === String(b.itemId || '')
+  );
+}
+
+function updateCurrentNavHistorySnapshot() {
+  if (!state.activeWorkspace || !Array.isArray(state.navHistory)) return;
+  if (state.navHistoryIndex < 0 || state.navHistoryIndex >= state.navHistory.length) return;
+  const cur = captureNavSnapshot();
+  if (!cur) return;
+  const existing = state.navHistory[state.navHistoryIndex];
+  if (_sameNavContext(existing, cur)) {
+    state.navHistory[state.navHistoryIndex] = cur;
+  }
+}
+
+function updateNavHistoryButtons() {
+  const hist = state.navHistory || [];
+  const idx = typeof state.navHistoryIndex === 'number' ? state.navHistoryIndex : -1;
+  const canBack = idx > 0;
+  const canFwd = idx >= 0 && idx < hist.length - 1;
+  const isEn = state.appLang === 'en';
+  const prevSnap = canBack ? hist[idx - 1] : null;
+  const nextSnap = canFwd ? hist[idx + 1] : null;
+  const backTitle = canBack && prevSnap?.label
+    ? (isEn ? `Back: ${prevSnap.label} (Alt + ←)` : `Quay lại: ${prevSnap.label} (Alt + ←)`)
+    : (isEn ? 'Back (Alt + ←)' : 'Quay lại (Alt + ←)');
+  const fwdTitle = canFwd && nextSnap?.label
+    ? (isEn ? `Forward: ${nextSnap.label} (Alt + →)` : `Đi tiếp: ${nextSnap.label} (Alt + →)`)
+    : (isEn ? 'Forward (Alt + →)' : 'Đi tiếp (Alt + →)');
+
+  document.querySelectorAll('.nav-hist-back-btn').forEach((btn) => {
+    btn.disabled = !canBack;
+    btn.title = backTitle;
+    btn.setAttribute('aria-label', backTitle);
+  });
+  document.querySelectorAll('.nav-hist-fwd-btn').forEach((btn) => {
+    btn.disabled = !canFwd;
+    btn.title = fwdTitle;
+    btn.setAttribute('aria-label', fwdTitle);
+  });
+}
+
+function pushNavHistory(opts = {}) {
+  if (state._navRestoring || opts?.fromHistory || !state.activeWorkspace) return;
+  if (!Array.isArray(state.navHistory)) state.navHistory = [];
+  const snap = captureNavSnapshot();
+  if (!snap) return;
+
+  const idx = state.navHistoryIndex;
+  const cur = idx >= 0 ? state.navHistory[idx] : null;
+  if (_sameNavContext(cur, snap)) {
+    state.navHistory[idx] = snap;
+    updateNavHistoryButtons();
+    return;
+  }
+
+  if (idx < state.navHistory.length - 1) {
+    state.navHistory = state.navHistory.slice(0, idx + 1);
+  }
+  state.navHistory.push(snap);
+  if (state.navHistory.length > 30) {
+    state.navHistory.shift();
+  }
+  state.navHistoryIndex = state.navHistory.length - 1;
+  updateNavHistoryButtons();
+}
+
+function _applyNavSnapshot(snap) {
+  if (!snap) return;
+  state._navRestoring = true;
+  try {
+    if (snap.section === 'flashcards') {
+      enterWorkspace(snap.workspace, 'flashcards', {
+        keepFocusItem: true,
+        drillKey: snap.tabKey,
+        drillSnapshot: snap.drillState || null,
+        preserveDrillState: true,
+        targetCardKey: snap.drillState?.cardKey || null,
+        fromHistory: true,
+      });
+    } else {
+      if (snap.section === 'repairs' && snap.itemId) {
+        state.selectedRepairId = snap.itemId;
+        if (typeof getFilteredRepairCases === 'function' && !getFilteredRepairCases().some((x) => x.id === snap.itemId)) {
+          state.repairFilters = { category: 'ALL', status: 'ALL', q: '' };
+          _applyWorkspaceFilterDom('mrl');
+        }
+      } else if (snap.section === 'knowledge' && snap.itemId) {
+        state.selectedKnowledgeId = snap.itemId;
+        if (typeof getFilteredKnowledgeItems === 'function' && !getFilteredKnowledgeItems().some((x) => x.id === snap.itemId)) {
+          state.knowledgeFilters = { group: 'ALL', mode: 'ALL', category: 'ALL', status: 'ALL', q: '' };
+          _applyWorkspaceFilterDom('mrl');
+        }
+      } else if (snap.section === 'plc' && snap.itemId) {
+        state.selectedPlcId = snap.itemId;
+        if (typeof getFilteredPlcNotes === 'function' && !getFilteredPlcNotes().some((x) => x.id === snap.itemId)) {
+          state.plcFilters = { category: 'ALL', status: 'ALL', q: '' };
+          _applyWorkspaceFilterDom('plc');
+        }
+      } else if (snap.section === 'network' && snap.itemId) {
+        state.selectedNetworkId = snap.itemId;
+        if (typeof getFilteredNetworkNotes === 'function' && !getFilteredNetworkNotes().some((x) => x.id === snap.itemId)) {
+          state.networkFilters = { protocol: 'ALL', status: 'ALL', q: '' };
+          _applyWorkspaceFilterDom('network');
+        }
+      } else if (snap.section === 'en-vocab-bank' && snap.itemId) {
+        state.selectedEnglishVocabId = snap.itemId;
+        if (typeof getFilteredEnVocab === 'function' && !getFilteredEnVocab().some((x) => String(x.id) === String(snap.itemId))) {
+          state.enBankFilters = { category: 'ALL', status: 'ALL', q: '' };
+          _applyWorkspaceFilterDom('english');
+        }
+      }
+      enterWorkspace(snap.workspace, snap.section, {
+        fromHistory: true,
+        preserveSelectionOnHistory: true,
+      });
+    }
+  } finally {
+    state._navRestoring = false;
+  }
+  updateNavHistoryButtons();
+}
+
+function goNavBack() {
+  const hist = state.navHistory || [];
+  if (state.navHistoryIndex <= 0) return;
+  if (typeof flushPendingDrillDraft === 'function') flushPendingDrillDraft();
+  updateCurrentNavHistorySnapshot();
+  if (state.activeWorkspace) saveWorkspaceMemory(state.activeWorkspace);
+  state.navHistoryIndex -= 1;
+  _applyNavSnapshot(hist[state.navHistoryIndex]);
+}
+
+function goNavForward() {
+  const hist = state.navHistory || [];
+  if (state.navHistoryIndex < 0 || state.navHistoryIndex >= hist.length - 1) return;
+  if (typeof flushPendingDrillDraft === 'function') flushPendingDrillDraft();
+  updateCurrentNavHistorySnapshot();
+  if (state.activeWorkspace) saveWorkspaceMemory(state.activeWorkspace);
+  state.navHistoryIndex += 1;
+  _applyNavSnapshot(hist[state.navHistoryIndex]);
+}
+
 function openPortalScreen() {
   _flushInlineSectionOnLeave(false);
+  if (state.activeWorkspace) saveWorkspaceMemory(state.activeWorkspace);
   state.activeWorkspace = null;
   document.body.classList.remove('ws-english');
   document.getElementById('portal-screen')?.classList.remove('hidden');
@@ -416,15 +750,42 @@ function openPortalScreen() {
 function enterWorkspace(ws, tabName = null, opts = {}) {
   const targetWs = WORKSPACE_META[ws] ? ws : 'mrl';
   const meta = WORKSPACE_META[targetWs];
+  const prevWs = state.activeWorkspace;
+  if (prevWs && !opts.skipSaveMemory) {
+    saveWorkspaceMemory(prevWs);
+  }
+
   state.activeWorkspace = targetWs;
   document.body.classList.toggle('ws-english', targetWs === 'english');
   if (targetWs === 'english' && state.splitMode && typeof closeSplitPane === 'function') {
     closeSplitPane();
   }
-  if (!opts.keepFocusItem && state.flashcard.focusItem) {
-    const fKind = state.flashcard.focusItem.kind;
-    const fWs = fKind === 'plc' ? 'plc' : (fKind === 'network' ? 'network' : 'mrl');
-    if (fWs !== targetWs) state.flashcard.focusItem = null;
+
+  const mem = state.workspaceMemory?.[targetWs] || null;
+  let restoringFromMemory = false;
+  let resolvedTab = null;
+
+  if (opts.drillKey) {
+    resolvedTab = 'flashcards';
+  } else if (tabName && meta.allowedTabs.includes(tabName)) {
+    resolvedTab = tabName;
+  } else if (!opts.forceDefault && mem?.activeTab && meta.allowedTabs.includes(mem.activeTab)) {
+    resolvedTab = mem.activeTab;
+    restoringFromMemory = true;
+  } else {
+    resolvedTab = meta.defaultTab;
+  }
+
+  if (resolvedTab === 'en-reading') {
+    state.enCoach.mode = 'reading';
+    resolvedTab = 'en-coach';
+  } else if (resolvedTab === 'en-ingest') {
+    state.enIngest.drawerOpen = true;
+    resolvedTab = 'en-vocab-bank';
+  }
+
+  if (restoringFromMemory) {
+    _restoreWorkspaceMemoryFields(targetWs, mem, opts);
   }
 
   if (opts.plcCategory !== undefined) {
@@ -459,24 +820,40 @@ function enterWorkspace(ws, tabName = null, opts = {}) {
   document.getElementById('sidebar-brand-sub').textContent = meta.sub;
   document.getElementById('sidebar-stats-title').textContent = meta.statsTitle;
 
-  let resolvedTab = (tabName && meta.allowedTabs.includes(tabName)) ? tabName : meta.defaultTab;
-  if (resolvedTab === 'en-reading') {
-    state.enCoach.mode = 'reading';
-    resolvedTab = 'en-coach';
-  } else if (resolvedTab === 'en-ingest') {
-    state.enIngest.drawerOpen = true;
-    resolvedTab = 'en-vocab-bank';
-  }
   const targetTab = resolvedTab;
   state.activeTab = targetTab;
-  if (targetWs === 'english' && targetTab === 'flashcards' && !['en_vocab', 'en_quiz'].includes(state.flashcard.mode)) {
-    state.flashcard.mode = 'en_vocab';
-  }
 
   renderSidebarForWorkspace();
   syncFlashcardFilterOptions();
+
+  let switchOpts = { _fromEnterWorkspace: true, fromHistory: opts.fromHistory };
+  if (targetTab === 'flashcards') {
+    if (opts.drillKey && typeof restoreDrillSession === 'function') {
+      const rest = restoreDrillSession(opts.drillKey, opts.drillSnapshot || null);
+      switchOpts.preserveDrillState = true;
+      switchOpts.targetCardKey = opts.targetCardKey || rest?.cardKey || null;
+    } else if (restoringFromMemory && mem && typeof restoreDrillSession === 'function') {
+      const fallbackKey = typeof getDrillTabKey === 'function' ? getDrillTabKey(targetWs, mem.drillSnapshot?.focusItem || null) : `drill:${targetWs}:all`;
+      const dKey = mem.lastDrillKey || mem.drillSnapshot?.key || fallbackKey;
+      const rest = restoreDrillSession(dKey, mem.drillSnapshot || null);
+      switchOpts.preserveDrillState = true;
+      switchOpts.targetCardKey = mem.drillSnapshot?.cardKey || rest?.cardKey || null;
+    } else {
+      if (!opts.keepFocusItem && state.flashcard.focusItem) {
+        const fKind = state.flashcard.focusItem.kind;
+        const fWs = fKind === 'plc' ? 'plc' : (fKind === 'network' ? 'network' : 'mrl');
+        if (fWs !== targetWs) state.flashcard.focusItem = null;
+      }
+      if (targetWs === 'english' && !['en_vocab', 'en_quiz'].includes(state.flashcard.mode)) {
+        state.flashcard.mode = 'en_vocab';
+      } else if (targetWs !== 'english' && ['en_vocab', 'en_quiz'].includes(state.flashcard.mode)) {
+        state.flashcard.mode = 'deep';
+      }
+    }
+  }
+
   renderHeaderStats();
-  switchTab(targetTab);
+  switchTab(targetTab, switchOpts);
   if (targetTab === 'repairs') renderRepairsView();
   else if (targetTab === 'knowledge') renderKnowledgeView();
   else if (targetTab === 'plc') renderPlcView();
@@ -486,6 +863,22 @@ function enterWorkspace(ws, tabName = null, opts = {}) {
   else if (targetTab === 'en-reading' && typeof renderEnReadingView === 'function') renderEnReadingView();
   else if (targetTab === 'en-vocab-bank' && typeof renderEnVocabBankView === 'function') renderEnVocabBankView();
   else if (targetTab === 'en-ingest' && typeof renderEnIngestView === 'function') renderEnIngestView();
+
+  if (restoringFromMemory && mem && (mem.scrollTop || mem.listScrollTop)) {
+    const scTop = mem.scrollTop || 0;
+    const lTop = mem.listScrollTop || 0;
+    const restoreScrollFn = () => {
+      const sEl = _getWorkspaceScrollEl(targetWs, targetTab);
+      if (sEl && scTop) sEl.scrollTop = scTop;
+      const lEl = _getWorkspaceListEl(targetWs, targetTab);
+      if (lEl && lTop) lEl.scrollTop = lTop;
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(restoreScrollFn);
+    else restoreScrollFn();
+  }
+
+  if (!opts.fromHistory) pushNavHistory();
+  else updateNavHistoryButtons();
 }
 
 function renderSidebarForWorkspace() {
@@ -659,8 +1052,11 @@ function applyTabVisibility() {
   document.querySelectorAll('.nav-tab-btn').forEach((b) => b.classList.remove('active'));
   document.getElementById(`tab-btn-${state.activeTab}`)?.classList.add('active');
 }
-function switchTab(tabName) {
+function switchTab(tabName, opts = {}) {
   _flushInlineSectionOnLeave(false);
+  if (state.activeWorkspace && !opts._fromEnterWorkspace) {
+    saveWorkspaceMemory(state.activeWorkspace);
+  }
   if (tabName === 'en-reading') {
     state.enCoach.mode = 'reading';
     tabName = 'en-coach';
@@ -668,15 +1064,35 @@ function switchTab(tabName) {
     state.enIngest.drawerOpen = true;
     tabName = 'en-vocab-bank';
   }
+  const ws = state.activeWorkspace || 'mrl';
   state.activeTab = tabName;
   if (state.activeWorkspace) renderSidebarForWorkspace();
   applyTabVisibility();
   if (tabName === 'flashcards') {
-    if (state.activeWorkspace === 'english' && !['en_vocab', 'en_quiz'].includes(state.flashcard.mode)) {
+    let preserveView = Boolean(opts.preserveDrillState);
+    let targetCardKey = opts.targetCardKey || null;
+    syncFlashcardFilterOptions();
+    if (!opts._fromEnterWorkspace && !opts.preserveDrillState && typeof restoreDrillSession === 'function') {
+      const mem = state.workspaceMemory?.[ws];
+      const preferredKey = (mem?.lastDrillKey && state.drillSessions?.[mem.lastDrillKey])
+        ? mem.lastDrillKey
+        : `drill:${ws}:all`;
+      if (state.drillSessions?.[preferredKey]) {
+        const rest = restoreDrillSession(preferredKey);
+        preserveView = true;
+        targetCardKey = rest?.cardKey || null;
+      } else {
+        state.flashcard.focusItem = null;
+        if (ws === 'english' && !['en_vocab', 'en_quiz'].includes(state.flashcard.mode)) {
+          state.flashcard.mode = 'en_vocab';
+        } else if (ws !== 'english' && ['en_vocab', 'en_quiz'].includes(state.flashcard.mode)) {
+          state.flashcard.mode = 'deep';
+        }
+      }
+    } else if (ws === 'english' && !['en_vocab', 'en_quiz'].includes(state.flashcard.mode)) {
       state.flashcard.mode = 'en_vocab';
     }
-    syncFlashcardFilterOptions();
-    buildFlashcardDeck();
+    buildFlashcardDeck(preserveView, { preserveViewState: preserveView, targetCardKey });
   } else if (tabName === 'dictionary') {
     renderDictionaryView();
   } else if (tabName === 'scratchpad') {
@@ -689,6 +1105,9 @@ function switchTab(tabName) {
     renderEnVocabBankView();
   }
   syncPrimaryEditorTab();
+  if (!opts.fromHistory && !opts._fromEnterWorkspace) {
+    pushNavHistory();
+  }
   if (typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
 }
 function renderAllViews() {
@@ -1103,6 +1522,7 @@ function navigateAdjacentItem(tab, delta) {
   meta.r();
   const pane = document.getElementById(meta.pane);
   if (pane) pane.scrollTop = 0;
+  pushNavHistory();
 }
 
 function renderFocusNavBar(tab, currentIdx, total) {

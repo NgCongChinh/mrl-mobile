@@ -41,6 +41,7 @@ function selectPlcNote(id) {
   renderPlcView();
   const pane = document.getElementById('plc-detail');
   if (pane) pane.scrollTop = 0;
+  if (typeof pushNavHistory === 'function') pushNavHistory();
 }
 
 function renderPlcView() {
@@ -196,6 +197,7 @@ function selectNetworkNote(id) {
   renderNetworkView();
   const pane = document.getElementById('network-detail');
   if (pane) pane.scrollTop = 0;
+  if (typeof pushNavHistory === 'function') pushNavHistory();
 }
 
 function renderNetworkView() {

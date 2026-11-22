@@ -15,9 +15,9 @@
   <link rel="icon" type="image/png" sizes="192x192" href="./static/icons/icon-nc-192.png" />
   <link rel="stylesheet" href="./static/fonts.css?v=1" />
   <script>try{if(localStorage.getItem("mrl-theme")==="light"){document.documentElement.dataset.theme="light";var mc=document.querySelector('meta[name="theme-color"]');if(mc)mc.setAttribute("content","#FFFFFF");}if(localStorage.getItem("mrl-en-mode")!=="0")document.documentElement.classList.add("en-mode-on");if(localStorage.getItem("mrl-app-lang")==="en")document.documentElement.dataset.lang="en";}catch(e){}</script>
-  <link rel="stylesheet" href="./static/styles.css?v=40" />
-  <link rel="stylesheet" href="./static/mobile.css?v=19" />
-  <meta name="mrl-build" content="20261122043615" />
+  <link rel="stylesheet" href="./static/styles.css?v=41" />
+  <link rel="stylesheet" href="./static/mobile.css?v=20" />
+  <meta name="mrl-build" content="20261122073823" />
 </head>
 <body spellcheck="false">
 <input type="file" id="excel-import-input" accept=".xlsx,.xlsm" class="hidden" />
@@ -72,7 +72,17 @@
     <div class="ws-nav-head">
       <div class="ws-nav-top">
         <button type="button" class="portal-back-btn" onclick="openPortalScreen()" title="Quay về màn hình chọn 4 phân hệ (Alt+Home)">← Màn hình chính</button>
-        <button type="button" class="sidebar-hide-btn" onclick="toggleLeftSidebar()" title="Ẩn thanh menu dọc bên trái (Ctrl+B)">« Ẩn</button>
+        <div class="nav-hist-group" role="group" aria-label="Lịch sử điều hướng">
+          <button type="button" id="nav-hist-back-btn" class="nav-hist-btn nav-hist-back-btn" onclick="goNavBack()" disabled data-no-i18n="1" title="Quay lại (Alt + ←)" aria-label="Quay lại">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+          </button>
+          <button type="button" id="nav-hist-fwd-btn" class="nav-hist-btn nav-hist-fwd-btn" onclick="goNavForward()" disabled data-no-i18n="1" title="Đi tiếp (Alt + →)" aria-label="Đi tiếp">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          </button>
+        </div>
+        <button type="button" class="sidebar-hide-btn" onclick="toggleLeftSidebar()" data-no-i18n="1" title="Ẩn thanh menu dọc bên trái (Ctrl+B)" aria-label="Ẩn thanh menu dọc">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="m15 15-3-3 3-3"/></svg>
+        </button>
       </div>
       <div class="ws-switcher" aria-label="Chuyển nhanh phân hệ">
         <button type="button" id="ws-pill-mrl" class="ws-pill" onclick="enterWorkspace('mrl')">MRL</button>
@@ -101,6 +111,14 @@
   <!-- ================= MAIN (TIA PORTAL TAB STRIP + SPLIT WORKSPACE) ================= -->
   <main class="main">
     <div id="editor-tabstrip" class="editor-tabstrip">
+      <div class="nav-hist-group tabstrip-nav-hist" role="group" aria-label="Lịch sử điều hướng">
+        <button type="button" class="nav-hist-btn nav-hist-back-btn" onclick="goNavBack()" disabled data-no-i18n="1" title="Quay lại (Alt + ←)" aria-label="Quay lại">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+        </button>
+        <button type="button" class="nav-hist-btn nav-hist-fwd-btn" onclick="goNavForward()" disabled data-no-i18n="1" title="Đi tiếp (Alt + →)" aria-label="Đi tiếp">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </button>
+      </div>
       <div id="editor-tabs-list" class="editor-tabs-list"></div>
       <div class="tabstrip-actions">
         <button type="button" id="workspace-streak-badge" class="streak-pill compact" onclick="enterWorkspace('english', 'en-quiz')" title="Chuỗi ngày học &amp; Mục tiêu Tiếng Anh hôm nay">
@@ -116,8 +134,10 @@
           <button type="button" class="lang-btn" data-lang-btn="en" onclick="setAppLanguage('en')" title="English (100% UI &amp; Content)">EN</button>
         </div>
         <button type="button" id="btn-en-mode" class="btn btn-sm split-on" onclick="toggleEnMode()" title="Bật/tắt chế độ học Tiếng Anh song ngữ (quét chữ dịch, gạch chân thuật ngữ)">🇬🇧 EN: BẬT</button>
-        <button type="button" id="en-top-ai-cfg-btn" class="btn btn-sm hidden" onclick="openAiConfigModal()" title="Cấu hình Gemini API Key miễn phí từ Google AI Studio">🔑 Cấu hình Gemini API Key</button>
-        <button type="button" id="btn-en-vocab" class="btn btn-sm" onclick="openVocabModal()" title="Sổ từ vựng Tiếng Anh chuyên ngành">⭐ <span class="en-vocab-pill-lbl">Từ vựng</span> (<span class="en-vocab-count">0</span>)</button>
+        <button type="button" id="global-ai-cfg-btn" class="btn btn-sm ai-global-btn is-off" data-no-i18n="1" onclick="openAiConfigModal()" title="Gemini AI · Offline">
+          <span class="ai-status-dot" aria-hidden="true"></span>
+          <span class="ai-btn-lbl">AI: TẮT</span>
+        </button>
         <button type="button" id="btn-split-vertical" class="btn btn-sm" onclick="toggleSplitMode('vertical')" title="Chia đôi Trái / Phải giống TIA Portal (Ctrl+\)">◫ Chia đôi</button>
         <button type="button" id="btn-split-horizontal" class="btn btn-sm" onclick="toggleSplitMode('horizontal')" title="Chia Trên / Dưới">⬓ Trên/Dưới</button>
         <button type="button" id="btn-swap-panes" class="btn btn-sm hidden" onclick="swapSplitPanes()" title="Đổi nội dung giữa Khung 1 và Khung 2">⇄ Đổi bên</button>
@@ -457,6 +477,7 @@
             <button type="button" id="p2-pill-repair" class="pane2-pill" onclick="setPane2Group('repair')">CA SỬA</button>
             <button type="button" id="p2-pill-knowledge" class="pane2-pill" onclick="setPane2Group('knowledge')">SOP</button>
             <button type="button" id="p2-pill-scratchpad" class="pane2-pill" onclick="setPane2Group('scratchpad')">NHÁP</button>
+            <button type="button" id="p2-pill-drill" class="pane2-pill" onclick="setPane2Group('drill')">ÔN TẬP</button>
           </div>
           <select id="pane2-item-select" class="sel pane2-sel" onchange="onPane2SelectChange()"></select>
           <div class="pane-head-actions">
@@ -1029,6 +1050,9 @@
 <div id="mobile-detail-topbar">
   <button type="button" id="mob-back-btn" class="mob-back-btn" onclick="closeMobileDetailOverlay(false)">← Quay lại</button>
   <span id="mob-detail-id" class="mob-detail-id">---</span>
+  <button type="button" id="mob-detail-ai-btn" class="mob-ai-pill is-off" data-no-i18n="1" onclick="openAiConfigModal()" title="Gemini AI">
+    <span class="ai-status-dot" aria-hidden="true"></span><span class="mob-ai-lbl">AI</span>
+  </button>
   <button type="button" id="mob-detail-lang-btn" class="mob-detail-lang-btn" onclick="toggleMobileQuickLang()" title="Chuyển nhanh ngôn ngữ VI / EN">VI</button>
   <button type="button" id="mob-wakelock-btn" class="mob-wakelock-btn hidden" onclick="toggleMobileWakeLock()" title="Giữ sáng màn hình khi đo mạch">☀️</button>
   <select id="mob-detail-status" class="sel mob-detail-status hidden" onchange="onMobileDetailStatusChange(this.value)">
@@ -1076,18 +1100,18 @@
 </div>
 
 <script src="./static/js/core_store.js?v=10"></script>
-<script src="./static/js/01-core.js?v=16"></script>
-<script src="./static/js/02-boot.js?v=16"></script>
-<script src="./static/js/03-views.js?v=13"></script>
+<script src="./static/js/01-core.js?v=17"></script>
+<script src="./static/js/02-boot.js?v=17"></script>
+<script src="./static/js/03-views.js?v=14"></script>
 <script src="./static/js/04-media.js?v=13"></script>
-<script src="./static/js/05-split.js?v=9"></script>
-<script src="./static/js/06-reference.js?v=11"></script>
-<script src="./static/js/07-flashcards.js?v=15"></script>
+<script src="./static/js/05-split.js?v=10"></script>
+<script src="./static/js/06-reference.js?v=12"></script>
+<script src="./static/js/07-flashcards.js?v=16"></script>
 <script src="./static/js/08-data.js?v=13"></script>
-<script src="./static/js/09-english.js?v=20"></script>
-<script src="./static/js/10-english-hub.js?v=15"></script>
+<script src="./static/js/09-english.js?v=21"></script>
+<script src="./static/js/10-english-hub.js?v=16"></script>
 <script src="./static/a11y.js?v=8"></script>
 <script src="./static/ui.js?v=11"></script>
-<script src="./static/js/mobile_shell.js?v=11"></script>
+<script src="./static/js/mobile_shell.js?v=12"></script>
 </body>
 </html>

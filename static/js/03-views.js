@@ -214,6 +214,7 @@ function selectRepairCase(id) {
   renderRepairsView();
   const pane = document.getElementById('repair-detail');
   if (pane) pane.scrollTop = 0;
+  if (typeof pushNavHistory === 'function') pushNavHistory();
 }
 
 function renderRepairsView() {
@@ -2000,6 +2001,7 @@ function selectKnowledgeItem(id) {
   renderKnowledgeView();
   const pane = document.getElementById('knowledge-detail');
   if (pane) pane.scrollTop = 0;
+  if (typeof pushNavHistory === 'function') pushNavHistory();
 }
 function toggleSopStep(itemId, idx) {
   const pane = document.getElementById('knowledge-detail');

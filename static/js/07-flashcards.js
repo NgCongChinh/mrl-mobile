@@ -697,6 +697,275 @@ function _getItemDrillStats(kind, itemOrId) {
   return { total: cards.length, solid, fuzzy, forgot };
 }
 
+const DRILL_DRAFT_PREFIX = 'mrl_drill_draft:';
+let _drillDraftSaveTimer = null;
+let _pendingDrillDraftWrite = null;
+
+function _drillDraftStorageKey(cardKey) {
+  return `${DRILL_DRAFT_PREFIX}${String(cardKey || '')}`;
+}
+
+function loadDrillDraft(cardKey) {
+  if (!cardKey) return '';
+  if (!state.flashcard.drafts) state.flashcard.drafts = {};
+  if (Object.prototype.hasOwnProperty.call(state.flashcard.drafts, cardKey)) {
+    return String(state.flashcard.drafts[cardKey] || '');
+  }
+  try {
+    const saved = sessionStorage.getItem(_drillDraftStorageKey(cardKey));
+    if (saved !== null) {
+      state.flashcard.drafts[cardKey] = saved;
+      return saved;
+    }
+  } catch (_) {}
+  return '';
+}
+
+function _writeDrillDraftNow(cardKey, val) {
+  if (!cardKey) return;
+  try {
+    const sKey = _drillDraftStorageKey(cardKey);
+    if (val && String(val).length > 0) sessionStorage.setItem(sKey, String(val));
+    else sessionStorage.removeItem(sKey);
+  } catch (_) {}
+}
+
+function persistDrillDraftDebounced(cardKey, val) {
+  if (!cardKey) return;
+  if (!state.flashcard.drafts) state.flashcard.drafts = {};
+  state.flashcard.drafts[cardKey] = val;
+  _pendingDrillDraftWrite = { cardKey, val };
+  clearTimeout(_drillDraftSaveTimer);
+  _drillDraftSaveTimer = setTimeout(() => {
+    const pending = _pendingDrillDraftWrite;
+    _pendingDrillDraftWrite = null;
+    if (pending) _writeDrillDraftNow(pending.cardKey, pending.val);
+  }, 150);
+}
+
+function flushPendingDrillDraft() {
+  clearTimeout(_drillDraftSaveTimer);
+  if (_pendingDrillDraftWrite) {
+    const pending = _pendingDrillDraftWrite;
+    _pendingDrillDraftWrite = null;
+    _writeDrillDraftNow(pending.cardKey, pending.val);
+  }
+}
+
+if (typeof window !== 'undefined' && !window._mrlDrillUnloadBound) {
+  window._mrlDrillUnloadBound = true;
+  window.addEventListener('beforeunload', flushPendingDrillDraft);
+}
+
+function _cardKeyBelongsToItem(cardKey, kind, id) {
+  const k = String(cardKey || '');
+  return (
+    k.startsWith(`${kind}:${id}:`) ||
+    k === `${kind}:${id}` ||
+    k === `summary:${kind}:${id}` ||
+    k.startsWith(`quiz:${kind}:${id}`) ||
+    (kind === 'knowledge' && k === `quiz:knw:${id}`) ||
+    (kind === 'network' && k.startsWith(`quiz:net:${id}:`))
+  );
+}
+
+function clearDrillDraftsForItem(kind, id) {
+  flushPendingDrillDraft();
+  if (state.flashcard.drafts) {
+    Object.keys(state.flashcard.drafts).forEach((k) => {
+      if (_cardKeyBelongsToItem(k, kind, id)) delete state.flashcard.drafts[k];
+    });
+  }
+  try {
+    const toRemove = [];
+    for (let i = 0; i < sessionStorage.length; i += 1) {
+      const sk = sessionStorage.key(i) || '';
+      if (sk.startsWith(DRILL_DRAFT_PREFIX)) {
+        const ck = sk.slice(DRILL_DRAFT_PREFIX.length);
+        if (_cardKeyBelongsToItem(ck, kind, id)) toRemove.push(sk);
+      }
+    }
+    toRemove.forEach((sk) => sessionStorage.removeItem(sk));
+  } catch (_) {}
+}
+
+function getDrillTabKey(ws, focusItem) {
+  const w = ws || state.activeWorkspace || 'mrl';
+  const fid = focusItem && _wsForItemKind(focusItem.kind) === w && focusItem.id ? focusItem.id : 'all';
+  return `drill:${w}:${fid}`;
+}
+
+function getCurrentDrillKey() {
+  return getDrillTabKey(state.activeWorkspace || 'mrl', state.flashcard.focusItem);
+}
+
+function _cloneShallowRecordMap(src) {
+  return src && typeof src === 'object' ? { ...src } : {};
+}
+
+function saveCurrentDrillSession() {
+  flushPendingDrillDraft();
+  if (!state.activeWorkspace) return null;
+  if (!state.drillSessions) state.drillSessions = {};
+  const ws = state.activeWorkspace;
+  const fi = state.flashcard.focusItem && _wsForItemKind(state.flashcard.focusItem.kind) === ws
+    ? { kind: state.flashcard.focusItem.kind, id: state.flashcard.focusItem.id }
+    : null;
+  const key = getDrillTabKey(ws, fi);
+  const deck = Array.isArray(state.flashcard.deck) ? state.flashcard.deck : [];
+  const idx = Math.max(0, Math.min(Number(state.flashcard.index) || 0, Math.max(0, deck.length - 1)));
+  const card = deck[idx] || null;
+  const sf = document.getElementById('fc-status-filter')?.value || state.flashcard.statusFilter || (fi ? 'ALL' : 'ACTIVE');
+  const tf = document.getElementById('fc-type-filter')?.value || state.flashcard.typeFilter || 'ALL';
+  const prev = state.drillSessions[key] || {};
+  const snap = {
+    key,
+    ws,
+    focusItem: fi,
+    mode: state.flashcard.mode || prev.mode || (ws === 'english' ? 'en_vocab' : 'deep'),
+    statusFilter: sf,
+    typeFilter: tf,
+    unsolidOnly: Boolean(state.flashcard.unsolidOnly),
+    showDraftBox: state.flashcard.showDraftBox !== false,
+    index: idx,
+    cardKey: card?.cardKey || prev.cardKey || null,
+    flipped: Boolean(state.flashcard.flipped),
+    showHint: Boolean(state.flashcard.showHint),
+    showContext: Boolean(state.flashcard.showContext),
+    editingDraftOnBack: Boolean(state.flashcard.editingDraftOnBack),
+    deckLength: deck.length,
+    evaluations: _cloneShallowRecordMap(state.flashcard.evaluations),
+    followUps: _cloneShallowRecordMap(state.flashcard.followUps),
+    quizAnswers: _cloneShallowRecordMap(state.flashcard.quizAnswers),
+    supplementSaved: _cloneShallowRecordMap(state.flashcard.supplementSaved),
+    updatedAt: Date.now(),
+  };
+  state.drillSessions[key] = snap;
+  return snap;
+}
+
+function parseDrillTabKey(key) {
+  const m = String(key || '').match(/^drill:([^:]+):(.+)$/);
+  if (!m) return null;
+  const ws = m[1];
+  const scopeId = m[2];
+  if (scopeId === 'all') return { key, ws, focusItem: null };
+  let kind = 'repair';
+  if (ws === 'plc') kind = 'plc';
+  else if (ws === 'network') kind = 'network';
+  else if (state.knowledgeItems.some((k) => k.id === scopeId)) kind = 'knowledge';
+  return { key, ws, focusItem: { kind, id: scopeId } };
+}
+
+function restoreDrillSession(drillKey, fallbackSnap = null) {
+  if (!state.drillSessions) state.drillSessions = {};
+  let sess = state.drillSessions[drillKey] || fallbackSnap;
+  if (!sess) {
+    const parsed = parseDrillTabKey(drillKey);
+    if (!parsed) return null;
+    sess = {
+      key: drillKey,
+      ws: parsed.ws,
+      focusItem: parsed.focusItem,
+      mode: parsed.ws === 'english' ? 'en_vocab' : 'deep',
+      statusFilter: parsed.focusItem ? 'ALL' : 'ACTIVE',
+      typeFilter: 'ALL',
+      unsolidOnly: false,
+      showDraftBox: true,
+      index: 0,
+      cardKey: null,
+      flipped: false,
+      showHint: false,
+      showContext: false,
+      editingDraftOnBack: false,
+    };
+  }
+  state.flashcard.focusItem = sess.focusItem ? { ...sess.focusItem } : null;
+  state.flashcard.mode = sess.mode || (sess.ws === 'english' ? 'en_vocab' : 'deep');
+  state.flashcard.statusFilter = sess.statusFilter || (sess.focusItem ? 'ALL' : 'ACTIVE');
+  state.flashcard.typeFilter = sess.typeFilter || 'ALL';
+  state.flashcard.unsolidOnly = Boolean(sess.unsolidOnly);
+  state.flashcard.showDraftBox = sess.showDraftBox !== false;
+  state.flashcard.index = Math.max(0, Number(sess.index) || 0);
+  state.flashcard.flipped = Boolean(sess.flipped);
+  state.flashcard.showHint = Boolean(sess.showHint);
+  state.flashcard.showContext = Boolean(sess.showContext);
+  state.flashcard.editingDraftOnBack = Boolean(sess.editingDraftOnBack);
+  if (sess.evaluations) state.flashcard.evaluations = { ...(state.flashcard.evaluations || {}), ...sess.evaluations };
+  if (sess.followUps) state.flashcard.followUps = { ...(state.flashcard.followUps || {}), ...sess.followUps };
+  if (sess.quizAnswers) state.flashcard.quizAnswers = { ...(state.flashcard.quizAnswers || {}), ...sess.quizAnswers };
+  if (sess.supplementSaved) state.flashcard.supplementSaved = { ...(state.flashcard.supplementSaved || {}), ...sess.supplementSaved };
+
+  const modeSel = document.getElementById('fc-mode-filter');
+  if (modeSel) modeSel.value = state.flashcard.mode;
+  const sfEl = document.getElementById('fc-status-filter');
+  if (sfEl) sfEl.value = state.flashcard.statusFilter;
+  const tfEl = document.getElementById('fc-type-filter');
+  if (tfEl && Array.from(tfEl.options || []).some((o) => o.value === state.flashcard.typeFilter)) {
+    tfEl.value = state.flashcard.typeFilter;
+  }
+  state.drillSessions[drillKey] = { ...sess };
+  return sess;
+}
+
+function buildDrillDeckForSession(sess) {
+  if (!sess) return [];
+  const ws = sess.ws || 'mrl';
+  const sf = sess.statusFilter || (sess.focusItem ? 'ALL' : 'ACTIVE');
+  const tf = sess.typeFilter || 'ALL';
+  const mode = sess.mode || (ws === 'english' ? 'en_vocab' : 'deep');
+  if (mode === 'en_vocab' || mode === 'en_quiz') {
+    let enDeck = typeof buildEnVocabFlashcards === 'function' ? buildEnVocabFlashcards(mode, ws, tf, sf) : [];
+    if (sess.unsolidOnly) {
+      enDeck = enDeck.filter((c) => state.reviewProgress?.[c.cardKey]?.rating !== 'solid');
+    }
+    return enDeck;
+  }
+  const fi = sess.focusItem;
+  const targets = [];
+  if (fi && _wsForItemKind(fi.kind) === ws) {
+    const rec = _findRecordByKindId(fi.kind, fi.id);
+    if (rec) targets.push({ kind: fi.kind, item: rec });
+  } else {
+    const ok = (code) => {
+      if (sf === 'ALL') return true;
+      return sf === 'ACTIVE' ? (code === 'review' || code === 'researching') : code === sf;
+    };
+    if (ws === 'mrl') {
+      if (tf.startsWith('repair_cat:')) {
+        const catKey = tf.slice(11);
+        state.repairCases.forEach((c) => { if (c.device_category === catKey && ok(c.status_code)) targets.push({ kind: 'repair', item: c }); });
+      } else if (tf.startsWith('knowledge_grp:')) {
+        const grpKey = tf.slice(14);
+        state.knowledgeItems.forEach((k) => { if (k.source_group === grpKey && ok(k.status_code)) targets.push({ kind: 'knowledge', item: k }); });
+      } else {
+        if (tf === 'ALL' || tf === 'repair') state.repairCases.forEach((c) => { if (ok(c.status_code)) targets.push({ kind: 'repair', item: c }); });
+        if (tf === 'ALL' || tf === 'knowledge') state.knowledgeItems.forEach((k) => { if (ok(k.status_code)) targets.push({ kind: 'knowledge', item: k }); });
+      }
+    } else if (ws === 'plc') {
+      state.plcNotes.forEach((p) => { if ((tf === 'ALL' || p.category === tf) && ok(p.status_code)) targets.push({ kind: 'plc', item: p }); });
+    } else if (ws === 'network') {
+      state.networkNotes.forEach((n) => { if ((tf === 'ALL' || n.protocol === tf) && ok(n.status_code)) targets.push({ kind: 'network', item: n }); });
+    }
+  }
+  let deck = [];
+  if (mode === 'summary') {
+    deck = targets.map(({ kind, item }) => _buildSummaryCard(kind, item));
+  } else if (mode === 'quiz') {
+    deck = _buildQuizCardsForTargets(targets);
+  } else {
+    targets.forEach(({ kind, item }) => {
+      const subCards = _buildDeepCardsForItem(kind, item);
+      if (subCards.length) deck.push(...subCards);
+      else deck.push(_buildSummaryCard(kind, item));
+    });
+  }
+  if (sess.unsolidOnly) {
+    deck = deck.filter((c) => state.reviewProgress?.[c.cardKey]?.rating !== 'solid');
+  }
+  return deck;
+}
+
 function onFlashcardModeChange() {
   const modeSel = document.getElementById('fc-mode-filter');
   state.flashcard.mode = modeSel?.value || 'deep';
@@ -716,24 +985,50 @@ function toggleFlashcardDraftBox() {
 }
 
 function startDrillForItem(kind, id) {
+  if (state.activeWorkspace && state.activeTab === 'flashcards') {
+    saveCurrentDrillSession();
+  } else {
+    flushPendingDrillDraft();
+  }
   const ws = _wsForItemKind(kind);
-  state.flashcard.focusItem = { kind, id };
-  if (state.flashcard.mode === 'summary') state.flashcard.mode = 'deep';
-  const modeSel = document.getElementById('fc-mode-filter');
-  if (modeSel) modeSel.value = state.flashcard.mode;
-  const sf = document.getElementById('fc-status-filter');
-  if (sf) sf.value = 'ALL';
-  enterWorkspace(ws, 'flashcards', { keepFocusItem: true });
+  const drillKey = `drill:${ws}:${id}`;
+  const existing = state.drillSessions?.[drillKey];
+  if (existing) {
+    enterWorkspace(ws, 'flashcards', { keepFocusItem: true, drillKey, preserveDrillState: true });
+    return;
+  }
+  const curMode = state.flashcard.mode;
+  const freshSnap = {
+    key: drillKey,
+    ws,
+    focusItem: { kind, id },
+    mode: (curMode === 'summary' || curMode === 'en_vocab' || curMode === 'en_quiz') ? 'deep' : (curMode || 'deep'),
+    statusFilter: 'ALL',
+    typeFilter: 'ALL',
+    unsolidOnly: false,
+    showDraftBox: state.flashcard.showDraftBox !== false,
+    index: 0,
+    cardKey: null,
+    flipped: false,
+    showHint: false,
+    showContext: false,
+    editingDraftOnBack: false,
+  };
+  enterWorkspace(ws, 'flashcards', { keepFocusItem: true, drillKey, drillSnapshot: freshSnap, preserveDrillState: true });
 }
 
 function startDrillForCategory(scope, key) {
+  if (state.activeWorkspace && state.activeTab === 'flashcards') {
+    saveCurrentDrillSession();
+  }
   const ws = (scope === 'plc' || scope === 'network' || scope === 'english') ? scope : 'mrl';
   state.flashcard.focusItem = null;
   if (ws === 'english') {
     state.flashcard.mode = 'en_vocab';
-  } else if (state.flashcard.mode === 'summary') {
+  } else if (state.flashcard.mode === 'summary' || state.flashcard.mode === 'en_vocab' || state.flashcard.mode === 'en_quiz') {
     state.flashcard.mode = 'deep';
   }
+  state.flashcard.statusFilter = 'ALL';
   const modeSel = document.getElementById('fc-mode-filter');
   if (modeSel) modeSel.value = state.flashcard.mode;
   enterWorkspace(ws, 'flashcards');
@@ -748,6 +1043,7 @@ function startDrillForCategory(scope, key) {
       else targetVal = key;
     }
     tf.value = Array.from(tf.options).some((o) => o.value === targetVal) ? targetVal : 'ALL';
+    state.flashcard.typeFilter = tf.value;
     tf.dispatchEvent(new Event('change', { bubbles: true }));
   } else {
     buildFlashcardDeck(false);
@@ -755,18 +1051,24 @@ function startDrillForCategory(scope, key) {
 }
 
 function clearFlashcardItemScope() {
+  saveCurrentDrillSession();
   state.flashcard.focusItem = null;
   const sf = document.getElementById('fc-status-filter');
   if (sf && sf.value === 'ALL') sf.value = 'ACTIVE';
+  state.flashcard.statusFilter = sf?.value || 'ACTIVE';
   buildFlashcardDeck(false);
+  if (typeof pushNavHistory === 'function') pushNavHistory();
 }
 
-function buildFlashcardDeck(keepIndex = false) {
+function buildFlashcardDeck(keepIndex = false, opts = {}) {
+  const preserveViewState = Boolean(opts && opts.preserveViewState);
   const ws = state.activeWorkspace || 'mrl';
-  const sf = document.getElementById('fc-status-filter')?.value || 'ACTIVE';
-  const tf = document.getElementById('fc-type-filter')?.value || 'ALL';
+  const sf = document.getElementById('fc-status-filter')?.value || state.flashcard.statusFilter || 'ACTIVE';
+  const tf = document.getElementById('fc-type-filter')?.value || state.flashcard.typeFilter || 'ALL';
   const mode = state.flashcard.mode || document.getElementById('fc-mode-filter')?.value || 'deep';
   state.flashcard.mode = mode;
+  state.flashcard.statusFilter = sf;
+  state.flashcard.typeFilter = tf;
 
   const modeSel = document.getElementById('fc-mode-filter');
   if (modeSel && modeSel.value !== mode) modeSel.value = mode;
@@ -782,10 +1084,19 @@ function buildFlashcardDeck(keepIndex = false) {
       enDeck = enDeck.filter((c) => state.reviewProgress?.[c.cardKey]?.rating !== 'solid');
     }
     state.flashcard.deck = enDeck;
-    if (!keepIndex || state.flashcard.index >= enDeck.length) state.flashcard.index = 0;
-    state.flashcard.flipped = false;
-    state.flashcard.showHint = false;
-    state.flashcard.showContext = false;
+    if (opts?.targetCardKey) {
+      const mIdx = enDeck.findIndex((c) => c.cardKey === opts.targetCardKey);
+      if (mIdx >= 0) state.flashcard.index = mIdx;
+      else if (state.flashcard.index >= enDeck.length) state.flashcard.index = 0;
+    } else if (!keepIndex || state.flashcard.index >= enDeck.length) {
+      state.flashcard.index = 0;
+    }
+    if (!preserveViewState) {
+      state.flashcard.flipped = false;
+      state.flashcard.showHint = false;
+      state.flashcard.showContext = false;
+      state.flashcard.editingDraftOnBack = false;
+    }
     renderFlashcardStage();
     return;
   }
@@ -846,11 +1157,19 @@ function buildFlashcardDeck(keepIndex = false) {
   }
 
   state.flashcard.deck = deck;
-  if (!keepIndex || state.flashcard.index >= deck.length) state.flashcard.index = 0;
-  state.flashcard.flipped = false;
-  state.flashcard.showHint = false;
-  state.flashcard.showContext = false;
-  state.flashcard.editingDraftOnBack = false;
+  if (opts?.targetCardKey) {
+    const mIdx = deck.findIndex((c) => c.cardKey === opts.targetCardKey);
+    if (mIdx >= 0) state.flashcard.index = mIdx;
+    else if (!keepIndex || state.flashcard.index >= deck.length) state.flashcard.index = 0;
+  } else if (!keepIndex || state.flashcard.index >= deck.length) {
+    state.flashcard.index = 0;
+  }
+  if (!preserveViewState) {
+    state.flashcard.flipped = false;
+    state.flashcard.showHint = false;
+    state.flashcard.showContext = false;
+    state.flashcard.editingDraftOnBack = false;
+  }
   renderFlashcardStage();
 }
 
@@ -872,11 +1191,12 @@ function _isTechnicalGraderCard(card) {
 function flipFlashcard() {
   const card = state.flashcard.deck[state.flashcard.index];
   if (!card || card.quiz) return;
+  flushPendingDrillDraft();
   state.flashcard.flipped = !state.flashcard.flipped;
   state.flashcard.editingDraftOnBack = false;
   if (state.flashcard.flipped && _isTechnicalGraderCard(card)) {
     state.flashcard.evaluations = state.flashcard.evaluations || {};
-    const draft = (state.flashcard.drafts[card.cardKey] || '').trim();
+    const draft = loadDrillDraft(card.cardKey).trim();
     const prevEv = state.flashcard.evaluations[card.cardKey];
     if (draft.length >= 5) {
       if (!prevEv || prevEv.evaluatedDraft !== draft) {
@@ -904,6 +1224,7 @@ function flipFlashcard() {
 function moveFlashcard(d) {
   const n = state.flashcard.deck.length;
   if (!n) return;
+  flushPendingDrillDraft();
   state.flashcard.index = (state.flashcard.index + d + n) % n;
   state.flashcard.flipped = false;
   state.flashcard.showHint = false;
@@ -918,7 +1239,7 @@ function toggleFlashcardContext() { state.flashcard.showContext = !state.flashca
 function onFlashcardDraftInput(val) {
   const card = state.flashcard.deck[state.flashcard.index];
   if (!card) return;
-  state.flashcard.drafts[card.cardKey] = val;
+  persistDrillDraftDebounced(card.cardKey, val);
   const flipBtn = document.getElementById('fc-primary-flip-btn');
   if (flipBtn && !state.flashcard.flipped) {
     flipBtn.textContent = String(val || '').trim().length >= 5 ? '⚡ Lật thẻ & Chấm điểm' : 'Lật thẻ / Đối chiếu';
@@ -990,8 +1311,9 @@ function toggleRubricChip(chipIdx) {
 async function evaluateCurrentFlashcard(preferAi = true) {
   const card = state.flashcard.deck[state.flashcard.index];
   if (!_isTechnicalGraderCard(card)) return;
+  flushPendingDrillDraft();
   state.flashcard.evaluations = state.flashcard.evaluations || {};
-  const draft = (state.flashcard.drafts[card.cardKey] || '').trim();
+  const draft = loadDrillDraft(card.cardKey).trim();
   if (draft.length < 2) {
     state.flashcard.editingDraftOnBack = true;
     renderFlashcardStage();
@@ -1201,7 +1523,7 @@ async function requestFlashcardFollowUp() {
   state.flashcard.followUps[card.cardKey] = { loading: true, showAnswer: false };
   renderFlashcardStage();
 
-  const draft = (state.flashcard.drafts[card.cardKey] || '').trim();
+  const draft = loadDrillDraft(card.cardKey).trim();
   try {
     const res = await fetch('/api/flashcards/follow-up', {
       method: 'POST',
@@ -1450,6 +1772,16 @@ async function resetItemDrillProgress(kind, id) {
         delete state.reviewProgress[k];
       }
     });
+    clearDrillDraftsForItem(kind, id);
+    ['evaluations', 'followUps', 'quizAnswers', 'supplementSaved'].forEach((mapName) => {
+      const m = state.flashcard[mapName];
+      if (!m) return;
+      Object.keys(m).forEach((k) => {
+        if (_cardKeyBelongsToItem(k, kind, id)) delete m[k];
+      });
+    });
+    state.flashcard.index = 0;
+    state.flashcard.flipped = false;
     showToast(`Đã reset tiến độ ôn tập của ${id}`, 'success');
     buildFlashcardDeck(false);
   } catch (err) {
@@ -1458,6 +1790,12 @@ async function resetItemDrillProgress(kind, id) {
 }
 
 function openFlashcardSourceRecord(kind, id) {
+  flushPendingDrillDraft();
+  if (state.activeWorkspace && state.activeTab === 'flashcards') {
+    saveCurrentDrillSession();
+    if (typeof syncPrimaryEditorTab === 'function') syncPrimaryEditorTab();
+    if (typeof updateCurrentNavHistorySnapshot === 'function') updateCurrentNavHistorySnapshot();
+  }
   if (kind === 'plc') jumpToPlcNote(id);
   else if (kind === 'network') jumpToNetworkNote(id);
   else if (kind === 'knowledge') jumpToKnowledgeItem(id);
@@ -1586,6 +1924,9 @@ function renderFlashcardStage() {
       <div style="color:var(--text-3);margin-top:8px;">${emptyMsg}</div>
       ${state.flashcard.focusItem ? `<button type="button" class="btn btn-sm" style="margin-top:14px;" onclick="clearFlashcardItemScope()">Quay lại toàn bộ bài</button>` : ''}
     </div>`;
+    saveCurrentDrillSession();
+    if (typeof syncPrimaryEditorTab === 'function' && state.activeTab === 'flashcards') syncPrimaryEditorTab();
+    if (typeof updateCurrentNavHistorySnapshot === 'function') updateCurrentNavHistorySnapshot();
     return;
   }
 
@@ -1645,7 +1986,7 @@ function renderFlashcardStage() {
       : `<button type="button" class="btn btn-sm" onclick="openFlashcardSourceRecord('${card.kind}', '${escapeHtml(card.id)}')">Mở bài gốc ↗</button>`;
     controlsRightHtml = `${audioBtnHtml}${srcBtnHtml}`;
   } else {
-    const draftVal = state.flashcard.drafts[card.cardKey] || '';
+    const draftVal = loadDrillDraft(card.cardKey);
     const isTechGrader = _isTechnicalGraderCard(card);
     const useCompare = flipped && (state.flashcard.showDraftBox || draftVal.trim().length > 0 || state.flashcard.editingDraftOnBack);
     const contextBlock = card.contextHtml && state.flashcard.showContext
@@ -1793,7 +2134,7 @@ function renderFlashcardStage() {
   const draftBackEl = document.getElementById('fc-user-draft-back');
   if (draftBackEl) {
     draftBackEl.addEventListener('input', () => {
-      state.flashcard.drafts[card.cardKey] = draftBackEl.value;
+      persistDrillDraftDebounced(card.cardKey, draftBackEl.value);
     });
     draftBackEl.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -1802,6 +2143,9 @@ function renderFlashcardStage() {
       }
     });
   }
+  saveCurrentDrillSession();
+  if (typeof syncPrimaryEditorTab === 'function' && state.activeTab === 'flashcards') syncPrimaryEditorTab();
+  if (typeof updateCurrentNavHistorySnapshot === 'function') updateCurrentNavHistorySnapshot();
   if (typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
 }
 
@@ -1866,9 +2210,15 @@ document.addEventListener('keydown', (e) => {
       return;
     }
   }
-  if (e.altKey && e.key === 'Home') {
+  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === 'Home') {
     e.preventDefault();
     if (!_hasOpenOverlay()) openPortalScreen();
+    return;
+  }
+  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && state.activeWorkspace && !_hasOpenOverlay()) {
+    e.preventDefault();
+    if (e.key === 'ArrowLeft' && typeof goNavBack === 'function') goNavBack();
+    else if (e.key === 'ArrowRight' && typeof goNavForward === 'function') goNavForward();
     return;
   }
   if (e.key === 'Escape') {
@@ -1918,8 +2268,8 @@ document.addEventListener('keydown', (e) => {
 
   if (state.activeTab !== 'flashcards') return;
   if (e.code === 'Space') { e.preventDefault(); flipFlashcard(); }
-  else if (e.key === 'ArrowRight') { e.preventDefault(); moveFlashcard(1); }
-  else if (e.key === 'ArrowLeft') { e.preventDefault(); moveFlashcard(-1); }
+  else if (e.key === 'ArrowRight' && !e.altKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); moveFlashcard(1); }
+  else if (e.key === 'ArrowLeft' && !e.altKey && !e.ctrlKey && !e.metaKey) { e.preventDefault(); moveFlashcard(-1); }
   else if (['1', '2', '3', '4'].includes(e.key)) {
     const cur = state.flashcard.deck[state.flashcard.index];
     if (cur?.quiz) {
@@ -1931,6 +2281,21 @@ document.addEventListener('keydown', (e) => {
       else if (e.key === '2') rateCurrentCard('fuzzy');
       else if (e.key === '3') rateCurrentCard('solid');
     }
+  }
+});
+
+// Hỗ trợ nút phụ bên hông chuột (Mouse 4 / Back = button 3, Mouse 5 / Forward = button 4)
+document.addEventListener('mousedown', (e) => {
+  if ((e.button === 3 || e.button === 4) && state.activeWorkspace && !_hasOpenOverlay()) {
+    e.preventDefault();
+  }
+});
+document.addEventListener('mouseup', (e) => {
+  if ((e.button === 3 || e.button === 4) && state.activeWorkspace && !_hasOpenOverlay()) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.button === 3 && typeof goNavBack === 'function') goNavBack();
+    else if (e.button === 4 && typeof goNavForward === 'function') goNavForward();
   }
 });
 

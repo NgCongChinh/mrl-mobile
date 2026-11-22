@@ -102,9 +102,16 @@
     }
 
     subEl.classList.remove('hidden');
-    subEl.innerHTML = pills.map((p) =>
-      `<button type="button" class="mob-sub-pill ${p.on ? 'active' : ''}" onclick="${p.act}">${p.lbl}</button>`
-    ).join('');
+    const hasKey = Boolean(state.hasGeminiKey);
+    const aiTip = hasKey
+      ? `Gemini AI · Model: ${state.geminiModel || 'gemini-3.5-flash-lite'}`
+      : (isEn ? 'Gemini AI · Offline' : 'Gemini AI · Offline');
+    subEl.innerHTML =
+      `<div class="mob-sub-scroll">${pills.map((p) =>
+        `<button type="button" class="mob-sub-pill ${p.on ? 'active' : ''}" onclick="${p.act}">${p.lbl}</button>`
+      ).join('')}</div>` +
+      `<div class="mob-subbar-ai-wrap"><button type="button" id="mob-subbar-ai-btn" class="mob-ai-pill ${hasKey ? 'is-on' : 'is-off'}" data-no-i18n="1" onclick="openAiConfigModal()" title="${escapeHtml(aiTip)}"><span class="ai-status-dot" aria-hidden="true"></span><span>AI</span></button></div>`;
+    if (typeof _syncAiKeyButtons === 'function') _syncAiKeyButtons();
   }
 
   window.mobileSubGo = function (ws, tab) {
@@ -126,6 +133,7 @@
       _syncMobileChrome();
       return;
     }
+    const wasSyncOpen = _mobileSyncOpen;
     _mobileSyncOpen = false;
     document.body.classList.remove('mobile-sync-open');
 
@@ -139,13 +147,15 @@
       try { history.pushState({ mrlMobWs: true }, ''); } catch (_) {}
     }
     if (target === 'repair') {
-      enterWorkspace('mrl', 'repairs');
+      if (state.activeWorkspace === 'mrl' && !wasSyncOpen) switchTab('repairs');
+      else enterWorkspace('mrl');
     } else if (target === 'plc_net') {
       const ws = _lastPlcNetWs === 'network' ? 'network' : 'plc';
-      enterWorkspace(ws, ws);
+      if ((state.activeWorkspace === 'plc' || state.activeWorkspace === 'network') && !wasSyncOpen) switchTab(state.activeWorkspace);
+      else enterWorkspace(ws);
     } else if (target === 'english') {
-      const tab = (state.activeTab && state.activeTab.startsWith('en-')) ? state.activeTab : 'en-quiz';
-      enterWorkspace('english', tab);
+      if (state.activeWorkspace === 'english' && !wasSyncOpen) switchTab('en-quiz');
+      else enterWorkspace('english');
     }
     _syncMobileChrome();
   };
@@ -423,6 +433,7 @@
       if (typeof orig !== 'function' || orig._mobAiWrapped) return;
       const wrapped = async function () {
         const out = await orig.apply(this, arguments);
+        if (typeof _syncAiKeyButtons === 'function') _syncAiKeyButtons();
         if (_mobileSyncOpen) renderMobileSyncPanel();
         return out;
       };
@@ -540,7 +551,7 @@
       <div class="msync-card">
         <div class="msync-card-title">🤖 ${isEn ? 'AI, BILINGUAL STUDY & INTERFACE' : 'AI GEMINI, SONG NGỮ & GIAO DIỆN'}</div>
         <div class="mob-sync-grid-btns">
-          <button type="button" class="btn" onclick="openAiConfigModal()">🔑 Gemini Key (${state.hasGeminiKey ? 'ON' : 'OFF'})</button>
+          <button type="button" class="btn ${state.hasGeminiKey ? 'ai-global-btn is-on' : 'ai-global-btn is-off'}" onclick="openAiConfigModal()"><span class="ai-status-dot" aria-hidden="true"></span><span>AI: ${state.hasGeminiKey ? (isEn ? 'ON' : 'BẬT') : (isEn ? 'OFF' : 'TẮT')} (${escapeHtml(state.geminiModel || 'gemini-3.5-flash-lite')})</span></button>
           <button type="button" class="btn" onclick="toggleMobileSyncLang()">🌐 ${state.appLang === 'en' ? 'Ngôn ngữ: EN → VI' : 'Ngôn ngữ: VI → EN'}</button>
           <button type="button" class="btn ${state.enMode ? 'split-on' : ''}" onclick="toggleEnMode()">🇬🇧 ${isEn ? (state.enMode ? 'EN Study: ON' : 'EN Study: OFF') : (state.enMode ? 'Song ngữ: BẬT' : 'Song ngữ: TẮT')}</button>
           <button type="button" class="btn" onclick="if(typeof openVocabModal==='function')openVocabModal()">⭐ ${isEn ? 'Vocab' : 'Sổ từ vựng'} (${(state.englishCards || []).length || (state.enVocabulary || []).length})</button>

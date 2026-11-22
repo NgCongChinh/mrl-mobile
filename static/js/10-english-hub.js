@@ -39,14 +39,35 @@ document.addEventListener('click', (ev) => {
 
 function _syncAiKeyButtons() {
   const isEn = state.appLang === 'en';
-  const txt = state.hasGeminiKey
-    ? (isEn ? '🔑 Gemini AI: ENABLED' : '🔑 Gemini AI: ĐÃ BẬT')
-    : (isEn ? '🔑 Gemini API Key (Offline)' : '🔑 Cấu hình Gemini API Key (Offline)');
-  ['en-top-ai-cfg-btn'].forEach((id) => {
-    const b = document.getElementById(id);
-    if (!b) return;
-    b.textContent = txt;
-    b.classList.toggle('btn-green', Boolean(state.hasGeminiKey));
+  const hasKey = Boolean(state.hasGeminiKey);
+  const model = state.geminiModel || 'gemini-3.5-flash-lite';
+  const tip = hasKey
+    ? `Gemini AI · Model: ${model}`
+    : (isEn
+      ? 'Gemini AI · Offline — Click to configure API Key'
+      : 'Gemini AI · Offline — Bấm để cấu hình API Key');
+
+  const gBtn = document.getElementById('global-ai-cfg-btn');
+  if (gBtn) {
+    gBtn.classList.toggle('is-on', hasKey);
+    gBtn.classList.toggle('is-off', !hasKey);
+    gBtn.title = tip;
+    gBtn.setAttribute('aria-label', tip);
+    const lbl = gBtn.querySelector('.ai-btn-lbl');
+    if (lbl) {
+      lbl.textContent = hasKey
+        ? (isEn ? 'AI: ON' : 'AI: BẬT')
+        : (isEn ? 'AI: OFF' : 'AI: TẮT');
+    }
+  }
+
+  ['mob-subbar-ai-btn', 'mob-detail-ai-btn'].forEach((id) => {
+    const mb = document.getElementById(id);
+    if (!mb) return;
+    mb.classList.toggle('is-on', hasKey);
+    mb.classList.toggle('is-off', !hasKey);
+    mb.title = tip;
+    mb.setAttribute('aria-label', tip);
   });
 }
 
@@ -1496,6 +1517,7 @@ function selectEnBankItem(cardId) {
   if (typeof flushUniFieldEdit === 'function') flushUniFieldEdit();
   state.selectedEnglishVocabId = cardId;
   renderEnVocabBankView();
+  if (typeof pushNavHistory === 'function') pushNavHistory();
 }
 
 function navigateAdjacentEnVocab(delta) {
@@ -1506,6 +1528,7 @@ function navigateAdjacentEnVocab(delta) {
   const nextIdx = curIdx < 0 ? 0 : (curIdx + delta + items.length) % items.length;
   state.selectedEnglishVocabId = items[nextIdx].id;
   renderEnVocabBankView();
+  if (typeof pushNavHistory === 'function') pushNavHistory();
 }
 
 function toggleVocabIngestDrawer(openFlag) {
@@ -2140,7 +2163,7 @@ async function openAiConfigModal() {
   const modal = document.getElementById('en-ai-config-modal');
   if (!modal) return;
   modal.classList.remove('hidden');
-  if (typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
+  if (typeof _translateUiLeafNodes === 'function') _translateUiLeafNodes(modal, state.appLang === 'en');
   const statusEl = document.getElementById('ai-cfg-status-banner');
   const keyInp = document.getElementById('ai-cfg-key-input');
   const modelSel = document.getElementById('ai-cfg-model-select');

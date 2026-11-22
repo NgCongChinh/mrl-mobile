@@ -1044,6 +1044,7 @@ function setAppLanguage(lang) {
   syncEnUiState();
   if (typeof renderStreakBadges === 'function') renderStreakBadges();
   if (typeof _syncAiKeyButtons === 'function') _syncAiKeyButtons();
+  if (typeof updateNavHistoryButtons === 'function') updateNavHistoryButtons();
   const resPromise = applyFullAppLocalization();
   showToast(target === 'en' ? 'Switched to English (100% UI & Content)' : 'Đã chuyển sang Tiếng Việt', 'info');
   return resPromise;
