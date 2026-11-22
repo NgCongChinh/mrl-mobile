@@ -1,6 +1,6 @@
 # NC38 — Standalone Mobile PWA (`mobile_dist/`)
 
-- **Build ID:** `20261122073823`
+- **Build ID:** `20261122074036`
 - **Bundled Records:** `88` records + `57` SRS cards
 
 ## Cách xuất bản để dùng độc lập mọi nơi khi tắt máy tính
