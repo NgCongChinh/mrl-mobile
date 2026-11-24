@@ -881,9 +881,12 @@
 
     (state.repairCases || []).forEach((r) => {
       if (hits.length >= 12) return;
-      const hay = [r.id, r.brand_model, r.device_category, r.cold_check_raw, r.fault_symptom_raw, r.root_cause_raw, r.solution_raw, r.note, ...(r.fault_codes || []), ...(r.component_tags || [])].join(' ').toLowerCase();
+      const blkTxt = window.MRLCoreStore?.serializeRepairBlocksToText
+        ? window.MRLCoreStore.serializeRepairBlocksToText(r.repair_blocks_json)
+        : '';
+      const hay = [r.id, r.brand_model, r.device_category, r.cold_check_raw, blkTxt, r.fault_symptom_raw, r.root_cause_raw, r.solution_raw, r.note, ...(r.fault_codes || []), ...(r.component_tags || [])].join(' ').toLowerCase();
       if (hay.includes(q)) {
-        pushHit('mrl', 'repairs', 'repair', r.id, 'REPAIR', r.brand_model || r.id, r.fault_symptom_raw || r.device_category || '');
+        pushHit('mrl', 'repairs', 'repair', r.id, 'REPAIR', r.brand_model || r.id, blkTxt || r.fault_symptom_raw || r.device_category || '');
       }
     });
     (state.knowledgeItems || []).forEach((k) => {

@@ -398,6 +398,7 @@
       if (!r || typeof r !== 'object') return;
       r.cold_check_raw = String(r.cold_check_raw || '');
       r.cold_check_json = resolveColdCheckRows(r.cold_check_json, r.cold_check_raw);
+      r.repair_blocks_json = convertLegacyStepsToBlocks(r, r.steps);
     });
     const knws = snap.knowledge_items || [];
     const plcs = snap.plc_notes || [];
@@ -2070,6 +2071,109 @@
     return [];
   }
 
+  function _isPlaceholderRepairTextJS(val) {
+    const s = String(val || '').trim().toLowerCase();
+    if (!s) return true;
+    const cleaned = s.replace(/^[\s\-–—]+|[\s\-–—]+$/g, '');
+    return cleaned === '' || cleaned === 'chưa ghi nhận' || cleaned === 'n/a' || cleaned === 'none';
+  }
+
+  function normalizeRepairBlocks(rawBlocks) {
+    let parsed = rawBlocks;
+    if (typeof rawBlocks === 'string') {
+      const s = rawBlocks.trim();
+      if (!s) return [];
+      try { parsed = JSON.parse(s); } catch (_) { return []; }
+    }
+    if (!Array.isArray(parsed)) return [];
+    const out = [];
+    for (const b of parsed) {
+      if (!b || typeof b !== 'object') continue;
+      const title = String(b.title || '').trim();
+      const rawRows = Array.isArray(b.rows) ? b.rows : [];
+      const normRows = [];
+      for (const r of rawRows) {
+        if (!r || typeof r !== 'object') continue;
+        const label = String(r.label || '').trim();
+        const content = String(r.content || '').trim();
+        if (!label && !content) continue;
+        let rid = String(r.id || '').trim();
+        if (!rid || rid.startsWith('row-draft-')) {
+          rid = `row-${normRows.length + 1}`;
+        }
+        normRows.push({ id: rid, label, content });
+      }
+      if (!title && !normRows.length) continue;
+      let bid = String(b.id || '').trim();
+      if (!bid || bid.startsWith('blk-draft-')) {
+        bid = `blk-${out.length + 1}`;
+      }
+      out.push({ id: bid, title, rows: normRows });
+    }
+    return out;
+  }
+
+  function convertLegacyStepsToBlocks(caseRow, steps = null) {
+    if (!caseRow || typeof caseRow !== 'object') return [];
+    const existing = normalizeRepairBlocks(caseRow.repair_blocks_json);
+    if (existing.length) return existing;
+
+    const legacySteps = [];
+    const srcSteps = Array.isArray(steps) ? steps : (Array.isArray(caseRow.steps) ? caseRow.steps : []);
+    for (const st of srcSteps) {
+      if (!st || typeof st !== 'object') continue;
+      const sym = _isPlaceholderRepairTextJS(st.symptom) ? '' : String(st.symptom || '').trim();
+      const cause = _isPlaceholderRepairTextJS(st.root_cause) ? '' : String(st.root_cause || '').trim();
+      const sol = _isPlaceholderRepairTextJS(st.solution) ? '' : String(st.solution || '').trim();
+      if (sym || cause || sol) {
+        legacySteps.push({ symptom: sym, root_cause: cause, solution: sol });
+      }
+    }
+
+    if (!legacySteps.length) {
+      const sym = _isPlaceholderRepairTextJS(caseRow.fault_symptom_raw) ? '' : String(caseRow.fault_symptom_raw || '').trim();
+      const cause = _isPlaceholderRepairTextJS(caseRow.root_cause_raw) ? '' : String(caseRow.root_cause_raw || '').trim();
+      const sol = _isPlaceholderRepairTextJS(caseRow.solution_raw) ? '' : String(caseRow.solution_raw || '').trim();
+      if (sym || cause || sol) {
+        legacySteps.push({ symptom: sym, root_cause: cause, solution: sol });
+      }
+    }
+
+    if (!legacySteps.length) return [];
+    const multi = legacySteps.length > 1;
+    const blocks = [];
+    legacySteps.forEach((st, idx) => {
+      const rows = [];
+      if (st.symptom) rows.push({ id: `row-${rows.length + 1}`, label: 'Hiện tượng / Điểm đo', content: st.symptom });
+      if (st.root_cause) rows.push({ id: `row-${rows.length + 1}`, label: 'Nguyên nhân gốc rễ', content: st.root_cause });
+      if (st.solution) rows.push({ id: `row-${rows.length + 1}`, label: 'Cách xử lý & Linh kiện', content: st.solution });
+      if (rows.length) {
+        const title = multi ? `Bước ${String(idx + 1).padStart(2, '0')}` : 'Quy trình bắt bệnh & Xử lý';
+        blocks.push({ id: `blk-${blocks.length + 1}`, title, rows });
+      }
+    });
+    return blocks;
+  }
+
+  function serializeRepairBlocksToText(blocks) {
+    const norm = normalizeRepairBlocks(blocks);
+    if (!norm.length) return '';
+    const parts = [];
+    for (const blk of norm) {
+      const lines = [];
+      if (blk.title) lines.push(`[${blk.title}]`);
+      for (const r of blk.rows) {
+        if (r.label && r.content) {
+          lines.push(`- ${r.label}: ${r.content}`);
+        } else if (r.label || r.content) {
+          lines.push(`- ${r.label || r.content}`);
+        }
+      }
+      if (lines.length) parts.push(lines.join('\n'));
+    }
+    return parts.join('\n\n');
+  }
+
   async function _parseBody(init) {
     if (!init || !init.body) return {};
     if (typeof FormData !== 'undefined' && init.body instanceof FormData) return init.body;
@@ -2130,20 +2234,37 @@
         coldRows = parseColdCheckTextToRows(coldCheckRaw);
       }
       const noteRaw = String(body.note || '').trim();
-      let steps = _normalizeRepairStepsJS(body.steps || []);
+      let steps = [];
       let faultRaw = String(body.fault_symptom_raw || '').trim();
       let causeRaw = String(body.root_cause_raw || '').trim();
       let solutionRaw = String(body.solution_raw || '').trim();
-      if (steps.length) {
-        const [fR, cR, sR] = _formatRepairStepsRawJS(steps);
-        faultRaw = faultRaw || fR;
-        causeRaw = causeRaw || cR;
-        solutionRaw = solutionRaw || sR;
-      } else if (faultRaw || causeRaw || solutionRaw) {
-        steps = [{ step_id: Date.now(), step_order: 1, symptom: faultRaw, root_cause: causeRaw, solution: solutionRaw }];
+      let repairBlocks = [];
+      if (Array.isArray(body.repair_blocks_json)) {
+        repairBlocks = normalizeRepairBlocks(body.repair_blocks_json);
+        const blocksText = serializeRepairBlocksToText(repairBlocks);
+        faultRaw = blocksText || faultRaw;
+        if (repairBlocks.length) {
+          causeRaw = '';
+          solutionRaw = '';
+        }
+      } else {
+        steps = _normalizeRepairStepsJS(body.steps || []);
+        if (steps.length) {
+          const [fR, cR, sR] = _formatRepairStepsRawJS(steps);
+          faultRaw = faultRaw || fR;
+          causeRaw = causeRaw || cR;
+          solutionRaw = solutionRaw || sR;
+        } else if (faultRaw || causeRaw || solutionRaw) {
+          steps = [{ step_id: Date.now(), step_order: 1, symptom: faultRaw, root_cause: causeRaw, solution: solutionRaw }];
+        }
+        repairBlocks = convertLegacyStepsToBlocks(
+          { repair_blocks_json: [], steps, fault_symptom_raw: faultRaw, root_cause_raw: causeRaw, solution_raw: solutionRaw },
+          steps
+        );
       }
       const stepsText = steps.map((s) => `${s.symptom} ${s.root_cause} ${s.solution}`).join(' ');
-      const fullText = `${brandModel} ${coldCheckRaw} ${faultRaw} ${causeRaw} ${solutionRaw} ${stepsText} ${noteRaw}`;
+      const blocksText = serializeRepairBlocksToText(repairBlocks);
+      const fullText = `${brandModel} ${coldCheckRaw} ${blocksText} ${faultRaw} ${causeRaw} ${solutionRaw} ${stepsText} ${noteRaw}`;
       const [compTags, faultCodes] = _extractRepairTagsJS(fullText, body.component_tags, body.fault_codes);
       const rec = {
         id,
@@ -2160,6 +2281,7 @@
         status_label: sl,
         component_tags: compTags,
         fault_codes: faultCodes,
+        repair_blocks_json: repairBlocks,
         steps,
         attachments: [],
         created_at: utcNowIso(),
@@ -2201,9 +2323,25 @@
       let nextFaultRaw = cur.fault_symptom_raw || '';
       let nextCauseRaw = cur.root_cause_raw || '';
       let nextSolRaw = cur.solution_raw || '';
-      if (Array.isArray(body.steps)) {
+      let nextBlocks = [];
+      if (Array.isArray(body.repair_blocks_json)) {
+        nextBlocks = normalizeRepairBlocks(body.repair_blocks_json);
+        nextFaultRaw = serializeRepairBlocksToText(nextBlocks);
+        nextCauseRaw = '';
+        nextSolRaw = '';
+        nextSteps = [];
+      } else if (Array.isArray(body.steps)) {
         nextSteps = _normalizeRepairStepsJS(body.steps);
         [nextFaultRaw, nextCauseRaw, nextSolRaw] = _formatRepairStepsRawJS(nextSteps);
+        const exBlocks = normalizeRepairBlocks(cur.repair_blocks_json);
+        nextBlocks = exBlocks.length
+          ? exBlocks
+          : convertLegacyStepsToBlocks(
+              { repair_blocks_json: [], steps: nextSteps, fault_symptom_raw: nextFaultRaw, root_cause_raw: nextCauseRaw, solution_raw: nextSolRaw },
+              nextSteps
+            );
+      } else {
+        nextBlocks = convertLegacyStepsToBlocks(cur, nextSteps);
       }
 
       const baseComps = Array.isArray(body.component_tags)
@@ -2222,7 +2360,9 @@
           changedParts.push(nextCold);
         }
         if (body.note !== undefined && body.note !== null) changedParts.push(nextNote);
-        if (Array.isArray(body.steps)) {
+        if (Array.isArray(body.repair_blocks_json)) {
+          changedParts.push(serializeRepairBlocksToText(nextBlocks));
+        } else if (Array.isArray(body.steps)) {
           changedParts.push(nextSteps.map((s) => `${s.symptom} ${s.root_cause} ${s.solution}`).join(' '));
         }
         [compTags, faultCodes] = _extractRepairTagsJS(changedParts.join(' '), baseComps, baseFaults);
@@ -2237,6 +2377,7 @@
         root_cause_raw: nextCauseRaw,
         solution_raw: nextSolRaw,
         note: nextNote,
+        repair_blocks_json: nextBlocks,
         steps: nextSteps,
         component_tags: compTags,
         fault_codes: faultCodes,
@@ -2280,13 +2421,31 @@
           coldRows = resolveColdCheckRows(cur.cold_check_json, coldCheckRaw);
         }
         const noteRaw = String(body.note !== undefined ? body.note : (cur.note || '')).trim();
-        const steps = Array.isArray(body.steps) ? _normalizeRepairStepsJS(body.steps) : (cur.steps || []);
-        const [fR, cR, sR] = _formatRepairStepsRawJS(steps);
-        const faultRaw = steps.length ? fR : String(body.fault_symptom_raw || '').trim();
-        const causeRaw = steps.length ? cR : String(body.root_cause_raw || '').trim();
-        const solutionRaw = steps.length ? sR : String(body.solution_raw || '').trim();
+        let steps = [];
+        let faultRaw = '';
+        let causeRaw = '';
+        let solutionRaw = '';
+        let repairBlocks = [];
+        if (Array.isArray(body.repair_blocks_json)) {
+          repairBlocks = normalizeRepairBlocks(body.repair_blocks_json);
+          faultRaw = serializeRepairBlocksToText(repairBlocks);
+        } else {
+          steps = Array.isArray(body.steps) ? _normalizeRepairStepsJS(body.steps) : (cur.steps || []);
+          const [fR, cR, sR] = _formatRepairStepsRawJS(steps);
+          faultRaw = steps.length ? fR : String(body.fault_symptom_raw || '').trim();
+          causeRaw = steps.length ? cR : String(body.root_cause_raw || '').trim();
+          solutionRaw = steps.length ? sR : String(body.solution_raw || '').trim();
+          const exBlocks = normalizeRepairBlocks(cur.repair_blocks_json);
+          repairBlocks = exBlocks.length
+            ? exBlocks
+            : convertLegacyStepsToBlocks(
+                { repair_blocks_json: [], steps, fault_symptom_raw: faultRaw, root_cause_raw: causeRaw, solution_raw: solutionRaw },
+                steps
+              );
+        }
         const stepsText = steps.map((s) => `${s.symptom} ${s.root_cause} ${s.solution}`).join(' ');
-        const fullText = `${brandModel} ${coldCheckRaw} ${faultRaw} ${causeRaw} ${solutionRaw} ${stepsText} ${noteRaw}`;
+        const blocksText = serializeRepairBlocksToText(repairBlocks);
+        const fullText = `${brandModel} ${coldCheckRaw} ${blocksText} ${faultRaw} ${causeRaw} ${solutionRaw} ${stepsText} ${noteRaw}`;
         const [compTags, faultCodes] = _extractRepairTagsJS(fullText, body.component_tags, body.fault_codes);
         const updated = {
           ...cur,
@@ -2303,6 +2462,7 @@
           status_label: sl,
           component_tags: compTags,
           fault_codes: faultCodes,
+          repair_blocks_json: repairBlocks,
           steps,
           updated_at: utcNowIso(),
         };
@@ -3970,6 +4130,9 @@
     parseColdCheckTextToRows,
     serializeColdCheckRowsToText,
     resolveColdCheckRows,
+    normalizeRepairBlocks,
+    convertLegacyStepsToBlocks,
+    serializeRepairBlocksToText,
     CAP_UNITS: CAP_UNITS_JS,
     isCapacitorColdRow,
     normalizeCapUnit,

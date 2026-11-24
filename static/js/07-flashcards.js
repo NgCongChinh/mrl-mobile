@@ -260,24 +260,27 @@ function _buildDeepCardsForItem(kind, item) {
 
   // 2. Nội dung đặc thù theo từng loại bản ghi
   if (kind === 'repair') {
-    const steps = item.steps && item.steps.length
-      ? item.steps
-      : [{ step_order: 1, symptom: item.fault_symptom_raw, root_cause: item.root_cause_raw, solution: item.solution_raw }];
-    steps.forEach((st, idx) => {
-      const sym = (st.symptom || '').trim();
-      const cause = (st.root_cause || '').trim();
-      const sol = (st.solution || '').trim();
-      if (!sym && !cause && !sol) return;
-      pushCard(`step:${st.step_order || idx + 1}:${_hashKey(sym + cause)}`, {
-        badge: `CA SỬA · BƯỚC ${pad2(st.step_order || idx + 1)}`,
-        subBadge: categoryLabel(item.device_category),
-        sourceField: 'step',
-        sectionTitle: `BƯỚC ${pad2(st.step_order || idx + 1)}`,
-        question: `Thiết bị ${title} xuất hiện hiện tượng:\n"${sym || item.fault_symptom_raw || 'Kiểm tra theo bước'}"\n→ Nguyên nhân gốc rễ và cách xử lý / linh kiện cần kiểm tra là gì?`,
-        hint: (item.fault_codes || []).length ? `Mã lỗi liên quan: ${(item.fault_codes || []).join(', ')}` : '',
-        answerText: [cause ? `Nguyên nhân: ${cause}` : '', sol ? `Xử lý: ${sol}` : ''].filter(Boolean).join('\n'),
-        answerHtml: `<div class="trace"><div class="step"><div class="step-head">BƯỚC ${pad2(st.step_order || idx + 1)}</div><div class="spec">
-          ${specRow('cause', 'root_cause', 'Nguyên nhân gốc rễ', cause, item, idx, false)}${specRow('sol', 'solution', 'Cách xử lý & Linh kiện', sol, item, idx, false)}</div></div></div>`,
+    const blocks = (typeof _resolveRepairBlocksForCase === 'function')
+      ? _resolveRepairBlocksForCase(item)
+      : (window.MRLCoreStore?.convertLegacyStepsToBlocks ? window.MRLCoreStore.convertLegacyStepsToBlocks(item, item.steps) : []);
+    blocks.forEach((blk, bi) => {
+      const bTitle = String(blk.title || '').trim() || `Mục ${bi + 1}`;
+      (blk.rows || []).forEach((r, ri) => {
+        const lbl = String(r.label || '').trim();
+        const cnt = String(r.content || '').trim();
+        if (!lbl && !cnt) return;
+        const qLabel = lbl || bTitle;
+        const ansTxt = cnt || lbl;
+        pushCard(`blk:${blk.id || bi + 1}:row:${r.id || ri + 1}:${_hashKey(bTitle + lbl)}`, {
+          badge: `CA SỬA · ${bTitle}`,
+          subBadge: categoryLabel(item.device_category),
+          sourceField: 'repair_block',
+          sectionTitle: bTitle,
+          question: `${title}\n[${bTitle}] — ${qLabel}\n→ Kết quả đo / Nội dung xử lý chi tiết là gì?`,
+          hint: (item.fault_codes || []).length ? `Mã lỗi liên quan: ${(item.fault_codes || []).join(', ')}` : '',
+          answerText: cnt ? `${lbl ? lbl + ': ' : ''}${cnt}` : lbl,
+          answerHtml: `<div class="rb-block"><div class="rb-head"><div class="rb-title">${escapeHtml(bTitle)}</div></div><div class="rb-table-wrap"><table class="rb-table"><colgroup><col class="rb-col-label" /><col class="rb-col-content" /></colgroup><tbody><tr class="rb-row"><td class="rb-td-label"><div class="rb-cell rb-cell-label">${escapeHtml(lbl || '—')}</div></td><td class="rb-td-content"><div class="rb-cell rb-cell-content">${highlightTagsHtml(ansTxt, item.component_tags, item.fault_codes)}</div></td></tr></tbody></table></div></div>`,
+        });
       });
     });
     if ((item.note || '').trim().length > 10) {
@@ -538,12 +541,35 @@ function _buildQuizCardsForTargets(targets) {
     });
   });
 
+  const _extractRepairQuizPair = (rc) => {
+    const blocks = (typeof _resolveRepairBlocksForCase === 'function')
+      ? _resolveRepairBlocksForCase(rc)
+      : (window.MRLCoreStore?.convertLegacyStepsToBlocks ? window.MRLCoreStore.convertLegacyStepsToBlocks(rc, rc?.steps) : []);
+    const flatRows = [];
+    blocks.forEach((b, bi) => {
+      const bTitle = String(b.title || '').trim() || `Mục ${bi + 1}`;
+      (b.rows || []).forEach((r) => {
+        const lbl = String(r.label || '').trim();
+        const cnt = String(r.content || '').trim();
+        if (lbl || cnt) flatRows.push({ bTitle, lbl, cnt });
+      });
+    });
+    if (flatRows.length >= 2) {
+      const qRow = flatRows[0];
+      const qText = `[${qRow.bTitle}] ${qRow.lbl ? `${qRow.lbl}: ` : ''}${qRow.cnt}`.trim();
+      const ansText = flatRows.slice(1).map((x) => (x.lbl ? `${x.lbl}: ${x.cnt}` : x.cnt)).filter(Boolean).join(' · ').trim();
+      return { qText, ansText };
+    }
+    if (flatRows.length === 1 && flatRows[0].lbl && flatRows[0].cnt) {
+      return { qText: `[${flatRows[0].bTitle}] — ${flatRows[0].lbl}`, ansText: flatRows[0].cnt };
+    }
+    return { qText: '', ansText: '' };
+  };
+
   const allRepairChoices = [];
   state.repairCases.forEach((rc) => {
-    const cause = (rc.root_cause_raw || rc.steps?.[0]?.root_cause || '').trim();
-    const sol = (rc.solution_raw || rc.steps?.[0]?.solution || '').trim();
-    const ans = [cause ? `Nguyên nhân: ${cause}` : '', sol ? `Xử lý: ${sol}` : ''].filter(Boolean).join(' · ').trim();
-    if (ans) allRepairChoices.push({ id: rc.id, text: ans.length > 180 ? `${ans.slice(0, 177)}...` : ans });
+    const { ansText } = _extractRepairQuizPair(rc);
+    if (ansText) allRepairChoices.push({ id: rc.id, text: ansText.length > 180 ? `${ansText.slice(0, 177)}...` : ansText });
   });
 
   const allKnowledgeChoices = [];
@@ -565,12 +591,9 @@ function _buildQuizCardsForTargets(targets) {
   targets.forEach(({ kind, item }) => {
     const title = _getItemTitle(kind, item);
     if (kind === 'repair' && allRepairChoices.length >= 3) {
-      const sym = (item.fault_symptom_raw || item.steps?.[0]?.symptom || '').trim();
-      const cause = (item.root_cause_raw || item.steps?.[0]?.root_cause || '').trim();
-      const sol = (item.solution_raw || item.steps?.[0]?.solution || '').trim();
-      const fullAns = [cause ? `Nguyên nhân: ${cause}` : '', sol ? `Xử lý: ${sol}` : ''].filter(Boolean).join(' · ').trim();
-      if (sym && fullAns) {
-        const correct = fullAns.length > 180 ? `${fullAns.slice(0, 177)}...` : fullAns;
+      const { qText, ansText } = _extractRepairQuizPair(item);
+      if (qText && ansText) {
+        const correct = ansText.length > 180 ? `${ansText.slice(0, 177)}...` : ansText;
         const distractors = pickDistractors(allRepairChoices.filter((x) => x.id !== item.id), correct, (x) => x.text);
         if (distractors.length >= 2) {
           const opts = _shuffledCopy([{ text: correct, ok: true }, ...distractors.map((d) => ({ text: d, ok: false }))]);
@@ -578,9 +601,9 @@ function _buildQuizCardsForTargets(targets) {
             cardKey: `quiz:repair:${item.id}`,
             kind, id: item.id, item, ws, title,
             badge: 'TRẮC NGHIỆM CA SỬA', subBadge: categoryLabel(item.device_category),
-            question: `Thiết bị "${title}" xuất hiện lỗi:\n"${sym}"\n→ Nguyên nhân gốc rễ & cách xử lý đúng là gì?`,
-            answerText: fullAns,
-            answerHtml: `<div class="note-block ans"><div class="nb-title">ĐÁP ÁN ĐÚNG · ${escapeHtml(item.id)}</div><div class="nb-body">${highlightTagsHtml(fullAns, item.component_tags, item.fault_codes)}</div></div>`,
+            question: `Thiết bị "${title}":\n${qText}\n→ Nội dung kiểm tra & hướng xử lý đúng là gì?`,
+            answerText: ansText,
+            answerHtml: `<div class="note-block ans"><div class="nb-title">ĐÁP ÁN ĐÚNG · ${escapeHtml(item.id)}</div><div class="nb-body">${highlightTagsHtml(ansText, item.component_tags, item.fault_codes)}</div></div>`,
             quiz: { options: opts.map((o) => o.text), correctIdx: opts.findIndex((o) => o.ok) },
           });
         }
@@ -1410,18 +1433,20 @@ async function appendSupplementToSourceRecord() {
   try {
     let saved = null;
     if (card.kind === 'repair') {
+      const existingBlocks = (typeof _resolveRepairBlocksForCase === 'function')
+        ? _resolveRepairBlocksForCase(rec)
+        : (window.MRLCoreStore?.convertLegacyStepsToBlocks ? window.MRLCoreStore.convertLegacyStepsToBlocks(rec, rec.steps) : []);
       const payload = {
         record_date: rec.record_date || '',
         device_category: rec.device_category || 'VFD',
         brand_model: rec.brand_model || rec.id,
-        fault_symptom_raw: rec.fault_symptom_raw || '',
-        root_cause_raw: rec.root_cause_raw || '',
-        solution_raw: rec.solution_raw || '',
+        cold_check_raw: rec.cold_check_raw || '',
+        cold_check_json: Array.isArray(rec.cold_check_json) ? rec.cold_check_json : [],
         note: rec.note ? `${String(rec.note).trimEnd()}\n${addition}` : addition,
         status_code: rec.status_code || 'review',
         component_tags: rec.component_tags || [],
         fault_codes: rec.fault_codes || [],
-        steps: rec.steps || [],
+        repair_blocks_json: existingBlocks,
       };
       const res = await fetch(`/api/repair-cases/${encodeURIComponent(rec.id)}`, {
         method: 'PUT',
@@ -1807,17 +1832,29 @@ async function markFlashcardMastered(kind, id) { await quickUpdateStatus(kind, i
 function _renderSummaryFlashcard(card, flipped) {
   if (card.kind === 'repair') {
     const c = card.item;
-    const steps = c.steps && c.steps.length ? c.steps : [{ step_order: 1, symptom: c.fault_symptom_raw, root_cause: c.root_cause_raw, solution: c.solution_raw }];
+    const blocks = (typeof _resolveRepairBlocksForCase === 'function')
+      ? _resolveRepairBlocksForCase(c)
+      : (window.MRLCoreStore?.convertLegacyStepsToBlocks ? window.MRLCoreStore.convertLegacyStepsToBlocks(c, c.steps) : []);
+    const firstRow = blocks[0]?.rows?.[0];
+    const frontHint = firstRow
+      ? `[${blocks[0].title || 'Mục 01'}] ${firstRow.label ? firstRow.label + ': ' : ''}${firstRow.content || ''}`.trim()
+      : (c.cold_check_raw || 'Chưa có mô tả kiểm tra');
     const front = `
       <div class="d-meta"><span class="d-id">${escapeHtml(c.id)}</span><span>CA SỬA CHỮA</span><span>${escapeHtml(categoryLabel(c.device_category))}</span>${ledHtml(c.status_code)}</div>
       <div class="d-title">${escapeHtml(c.brand_model)}</div>
-      <div class="note-block accent"><div class="nb-title">HIỆN TƯỢNG / MÃ LỖI QUAN SÁT</div><div class="nb-body">${escapeHtml(c.fault_symptom_raw || 'Chưa có mô tả triệu chứng')}</div>
+      <div class="note-block accent"><div class="nb-title">TỔNG QUAN / ĐIỂM KIỂM TRA ĐẦU</div><div class="nb-body">${escapeHtml(frontHint)}</div>
         ${c.fault_codes?.length ? `<div class="tags" style="margin-top:8px;">${renderTagPills([], c.fault_codes)}</div>` : ''}</div>
-      ${!flipped ? `<div class="fc-hidden">NGUYÊN NHÂN &amp; CÁCH XỬ LÝ ĐANG ẨN — tự chẩn đoán trước khi lật thẻ</div>` : ''}`;
+      ${!flipped ? `<div class="fc-hidden">CÁC MỤC KIỂM TRA &amp; XỬ LÝ ĐANG ẨN — tự chẩn đoán trước khi lật thẻ</div>` : ''}`;
+    const blocksSummaryHtml = blocks.map((blk, bi) => `
+      <div class="rb-block">
+        <div class="rb-head"><div class="rb-title">${escapeHtml(blk.title || `Mục ${bi + 1}`)}</div></div>
+        <div class="rb-table-wrap"><table class="rb-table"><colgroup><col class="rb-col-label" /><col class="rb-col-content" /></colgroup><tbody>
+          ${(blk.rows || []).map((r) => `<tr class="rb-row"><td class="rb-td-label"><div class="rb-cell rb-cell-label">${escapeHtml(r.label || '—')}</div></td><td class="rb-td-content"><div class="rb-cell rb-cell-content">${highlightTagsHtml(r.content || '', c.component_tags, c.fault_codes)}</div></td></tr>`).join('')}
+        </tbody></table></div>
+      </div>`).join('');
     const back = `<div class="fc-answer stack">
       ${c.note ? `<div class="warn"><div class="warn-title"><span>LƯU Ý CẤP NGUỒN TEST &amp; CẤU HÌNH VẬN HÀNH</span></div><div class="warn-body">${highlightTagsHtml(c.note, c.component_tags, c.fault_codes)}</div></div>` : ''}
-      <div class="trace">${steps.map((st, i) => `<div class="step"><div class="step-head">BƯỚC ${pad2(st.step_order || i + 1)}</div><div class="spec">
-        ${specRow('cause', 'root_cause', 'Nguyên nhân gốc rễ', st.root_cause, c, i, false)}${specRow('sol', 'solution', 'Cách xử lý & Linh kiện', st.solution, c, i, false)}</div></div>`).join('')}</div>
+      ${blocksSummaryHtml ? `<div class="rb-list">${blocksSummaryHtml}</div>` : ''}
       ${c.component_tags?.length ? `<div class="tags">${renderTagPills(c.component_tags, [])}</div>` : ''}</div>`;
     return { front, back };
   }

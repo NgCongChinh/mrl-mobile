@@ -120,32 +120,148 @@ function _getRepairCaseById(id) {
   return (state.repairCases || []).find((x) => x.id === id) || null;
 }
 
+function _rbSvgPlus() {
+  return '<svg class="rb-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg>';
+}
+
+function _rbSvgClose() {
+  return '<svg class="rb-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>';
+}
+
+function _rbSvgBilingual() {
+  return '<svg class="rb-svg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="5.5"/><path d="M2.8 8h10.4M8 2.5a8.5 8.5 0 0 1 0 11M8 2.5a8.5 8.5 0 0 0 0 11"/></svg>';
+}
+
+function _isPlaceholderRepairTextJS(val) {
+  const s = String(val || '').trim().toLowerCase();
+  if (!s) return true;
+  const cleaned = s.replace(/^[\s\-–—]+|[\s\-–—]+$/g, '');
+  return cleaned === '' || cleaned === 'chưa ghi nhận' || cleaned === 'n/a' || cleaned === 'none';
+}
+
+function _normalizeRepairBlocksForCase(rawBlocks) {
+  if (window.MRLCoreStore && typeof window.MRLCoreStore.normalizeRepairBlocks === 'function') {
+    return window.MRLCoreStore.normalizeRepairBlocks(rawBlocks);
+  }
+  let parsed = rawBlocks;
+  if (typeof rawBlocks === 'string') {
+    try { parsed = JSON.parse(rawBlocks.trim() || '[]'); } catch (_) { return []; }
+  }
+  if (!Array.isArray(parsed)) return [];
+  const out = [];
+  for (const b of parsed) {
+    if (!b || typeof b !== 'object') continue;
+    const title = String(b.title || '').trim();
+    const normRows = [];
+    for (const r of (Array.isArray(b.rows) ? b.rows : [])) {
+      if (!r || typeof r !== 'object') continue;
+      const label = String(r.label || '').trim();
+      const content = String(r.content || '').trim();
+      if (!label && !content) continue;
+      normRows.push({
+        id: String(r.id || '').trim() || `row-${normRows.length + 1}`,
+        label,
+        content,
+      });
+    }
+    if (!title && !normRows.length) continue;
+    out.push({
+      id: String(b.id || '').trim() || `blk-${out.length + 1}`,
+      title,
+      rows: normRows,
+    });
+  }
+  return out;
+}
+
+function _resolveRepairBlocksForCase(c) {
+  if (!c) return [];
+  if (window.MRLCoreStore && typeof window.MRLCoreStore.convertLegacyStepsToBlocks === 'function') {
+    return window.MRLCoreStore.convertLegacyStepsToBlocks(c, c.steps);
+  }
+  const existing = _normalizeRepairBlocksForCase(c.repair_blocks_json);
+  if (existing.length) return existing;
+  const srcSteps = Array.isArray(c.steps) ? c.steps : [];
+  const legacy = [];
+  srcSteps.forEach((st) => {
+    if (!st || typeof st !== 'object') return;
+    const sym = _isPlaceholderRepairTextJS(st.symptom) ? '' : String(st.symptom || '').trim();
+    const cause = _isPlaceholderRepairTextJS(st.root_cause) ? '' : String(st.root_cause || '').trim();
+    const sol = _isPlaceholderRepairTextJS(st.solution) ? '' : String(st.solution || '').trim();
+    if (sym || cause || sol) legacy.push({ symptom: sym, root_cause: cause, solution: sol });
+  });
+  if (!legacy.length) {
+    const sym = _isPlaceholderRepairTextJS(c.fault_symptom_raw) ? '' : String(c.fault_symptom_raw || '').trim();
+    const cause = _isPlaceholderRepairTextJS(c.root_cause_raw) ? '' : String(c.root_cause_raw || '').trim();
+    const sol = _isPlaceholderRepairTextJS(c.solution_raw) ? '' : String(c.solution_raw || '').trim();
+    if (sym || cause || sol) legacy.push({ symptom: sym, root_cause: cause, solution: sol });
+  }
+  const multi = legacy.length > 1;
+  return legacy.map((st, idx) => {
+    const rows = [];
+    if (st.symptom) rows.push({ id: `row-${rows.length + 1}`, label: 'Hiện tượng / Điểm đo', content: st.symptom });
+    if (st.root_cause) rows.push({ id: `row-${rows.length + 1}`, label: 'Nguyên nhân gốc rễ', content: st.root_cause });
+    if (st.solution) rows.push({ id: `row-${rows.length + 1}`, label: 'Cách xử lý & Linh kiện', content: st.solution });
+    return { id: `blk-${idx + 1}`, title: multi ? `Bước ${pad2(idx + 1)}` : 'Quy trình bắt bệnh & Xử lý', rows };
+  }).filter((b) => b.rows.length > 0);
+}
+
+function _serializeRepairBlocksJS(blocks) {
+  if (window.MRLCoreStore && typeof window.MRLCoreStore.serializeRepairBlocksToText === 'function') {
+    return window.MRLCoreStore.serializeRepairBlocksToText(blocks);
+  }
+  return _normalizeRepairBlocksForCase(blocks).map((blk) => {
+    const lines = blk.title ? [`[${blk.title}]`] : [];
+    blk.rows.forEach((r) => {
+      if (r.label && r.content) lines.push(`- ${r.label}: ${r.content}`);
+      else if (r.label || r.content) lines.push(`- ${r.label || r.content}`);
+    });
+    return lines.join('\n');
+  }).filter(Boolean).join('\n\n');
+}
+
+function _getDisplayRepairBlocksForCase(c) {
+  if (!c) return [];
+  const saved = _resolveRepairBlocksForCase(c);
+  const caseDraft = state.repairDraftBlocks && state.repairDraftBlocks[c.id];
+  const rowsMap = (caseDraft && caseDraft.rows) || {};
+  const draftBlocks = (caseDraft && Array.isArray(caseDraft.blocks)) ? caseDraft.blocks : [];
+
+  const merged = saved.map((b) => {
+    const rows = (b.rows || []).map((r) => ({ ...r }));
+    const dRows = Array.isArray(rowsMap[b.id]) ? rowsMap[b.id] : [];
+    const sortedDrafts = [...dRows].sort((a, z) => {
+      const ia = typeof a._insertAt === 'number' ? a._insertAt : 999999;
+      const iz = typeof z._insertAt === 'number' ? z._insertAt : 999999;
+      return ia - iz;
+    });
+    let offset = 0;
+    sortedDrafts.forEach((d) => {
+      const clone = { ...d, _isDraft: true };
+      if (typeof d._insertAt === 'number') {
+        const pos = Math.max(0, Math.min(d._insertAt + offset, rows.length));
+        rows.splice(pos, 0, clone);
+        offset += 1;
+      } else {
+        rows.push(clone);
+      }
+    });
+    return { ...b, rows };
+  });
+
+  draftBlocks.forEach((db) => {
+    merged.push({
+      ...db,
+      _isDraft: true,
+      rows: (db.rows || []).map((r) => ({ ...r, _isDraft: true })),
+    });
+  });
+
+  return merged;
+}
+
 function _getDisplayStepsForCase(c) {
-  if (!c) return [{ step_order: 1, symptom: '', root_cause: '', solution: '', _placeholder: true }];
-  let saved = [];
-  if (Array.isArray(c.steps) && c.steps.length) {
-    saved = c.steps.map((s, idx) => ({
-      step_order: s.step_order || idx + 1,
-      symptom: s.symptom || '',
-      root_cause: s.root_cause || '',
-      solution: s.solution || '',
-    }));
-  } else if (c.fault_symptom_raw || c.root_cause_raw || c.solution_raw) {
-    saved = [{
-      step_order: 1,
-      symptom: c.fault_symptom_raw || '',
-      root_cause: c.root_cause_raw || '',
-      solution: c.solution_raw || '',
-    }];
-  }
-  const drafts = (state.repairDraftSteps && Array.isArray(state.repairDraftSteps[c.id]))
-    ? state.repairDraftSteps[c.id].map((d) => ({ ...d, _isDraft: true }))
-    : [];
-  const combined = [...saved, ...drafts];
-  if (!combined.length) {
-    return [{ step_order: 1, symptom: '', root_cause: '', solution: '', _placeholder: true }];
-  }
-  return combined.map((s, i) => ({ ...s, step_order: i + 1 }));
+  return [];
 }
 
 function _recomputeRepairTagsDictionary() {
@@ -183,8 +299,9 @@ function getFilteredRepairCases() {
     if (category !== 'ALL' && c.device_category !== category) return false;
     if (status !== 'ALL' && c.status_code !== status) return false;
     if (needle) {
+      const blocksStr = _serializeRepairBlocksJS(_resolveRepairBlocksForCase(c));
       const stepsStr = (c.steps || []).map((s) => `${s.symptom} ${s.root_cause} ${s.solution}`).join(' ');
-      const hay = `${c.id} ${c.device_category} ${categoryLabel(c.device_category)} ${c.brand_model} ${c.cold_check_raw || ''} ${c.fault_symptom_raw} ${c.root_cause_raw} ${c.solution_raw} ${c.note} ${(c.component_tags || []).join(' ')} ${(c.fault_codes || []).join(' ')} ${stepsStr}`.toLowerCase();
+      const hay = `${c.id} ${c.device_category} ${categoryLabel(c.device_category)} ${c.brand_model} ${c.cold_check_raw || ''} ${blocksStr} ${c.fault_symptom_raw} ${c.root_cause_raw} ${c.solution_raw} ${c.note} ${(c.component_tags || []).join(' ')} ${(c.fault_codes || []).join(' ')} ${stepsStr}`.toLowerCase();
       if (!hay.includes(needle)) return false;
     }
     return true;
@@ -239,7 +356,7 @@ function renderRepairsView() {
   listEl.classList.add('has-selection');
   listEl.innerHTML = filtered.map((c) => {
     const sel = c.id === state.selectedRepairId;
-    const steps = (c.steps || []).length || 1;
+    const blockCnt = _resolveRepairBlocksForCase(c).length;
     const titleLine = String(c.brand_model || '').replace(/\s*\n+\s*/g, ' — ');
     const stLabel = (STATUS_META[c.status_code] || STATUS_META.unclassified).label;
     return `
@@ -252,7 +369,7 @@ function renderRepairsView() {
         </div>
         <div class="row-main">
           <div class="row-title" title="${escapeHtml(c.brand_model)}">${escapeHtml(titleLine)}</div>
-          <span class="row-step-count">${steps} bước</span>
+          <span class="row-step-count">${blockCnt} mục</span>
         </div>
       </div>`;
   }).join('');
@@ -531,34 +648,112 @@ function renderRepairNoteBlockHtml(c, inline = true) {
     </div>`;
 }
 
-function renderRepairStepsSectionInnerHtml(c, inline = true) {
-  const steps = _getDisplayStepsForCase(c);
+function _repairBlockCellHtml(value, c, placeholder) {
+  const cleanVal = String(value || '').trim();
+  return cleanVal
+    ? highlightTagsHtml(cleanVal, c?.component_tags, c?.fault_codes)
+    : `<span class="none">${escapeHtml(placeholder || '')}</span>`;
+}
+
+function renderRepairBlocksSectionHtml(c, inline = true) {
+  const isEn = _repairIsEnLang();
+  const blocks = _getDisplayRepairBlocksForCase(c);
   const cid = escapeHtml(c.id);
-  const traceHtml = steps.map((st, i) => `
-    <div class="step" data-step-idx="${i}">
-      <div class="step-head">
-        <span>BƯỚC ${pad2(st.step_order || i + 1)}</span>
-        <span class="step-head-acts">
-          <span class="rep-save-st" data-save-st="step-${i}"></span>
-          ${inline ? `<button type="button" class="step-del-btn" onclick="deleteRepairStepInline('${cid}', ${i})" title="Xóa bước này">✕ Xóa bước</button>` : ''}
-        </span>
-      </div>
-      <div class="spec">
-        ${specRow('sym', 'symptom', 'Hiện tượng / Điểm đo', st.symptom, c, i, inline)}
-        ${specRow('cause', 'root_cause', 'Nguyên nhân gốc rễ', st.root_cause, c, i, inline)}
-        ${specRow('sol', 'solution', 'Cách xử lý & Linh kiện', st.solution, c, i, inline)}
-      </div>
-    </div>`).join('');
+
+  if (!blocks.length) {
+    if (!inline) return '';
+    return `
+      <div class="rb-add-block-bar">
+        <button type="button" class="rb-add-block-btn" onmousedown="event.preventDefault()" onclick="addRepairBlockInline('${cid}')">
+          ${_rbSvgPlus()}
+          <span>${isEn ? 'Add Section' : 'Thêm mục mới'}</span>
+        </button>
+      </div>`;
+  }
+
+  const labelPh = isEn ? 'Item / Test point...' : 'Hạng mục / Điểm đo...';
+  const contentPh = isEn ? 'Details / Result...' : 'Nội dung / Kết quả đo...';
+  const untitledPh = isEn ? 'Untitled section (click to edit)' : 'Chưa đặt tên mục (chạm để sửa)';
+
+  const blocksHtml = blocks.map((blk, bi) => {
+    const blkTitle = String(blk.title || '').trim();
+    const blkDomKey = `rb-bilingual-${c.id}-${bi}`;
+    const rows = Array.isArray(blk.rows) ? blk.rows : [];
+
+    const rowsHtml = rows.length
+      ? rows.map((r, ri) => {
+          const lblHtml = _repairBlockCellHtml(r.label, c, labelPh);
+          const cntHtml = _repairBlockCellHtml(r.content, c, contentPh);
+          const lblAttrs = inline
+            ? `class="rb-cell rb-cell-label rb-editable" data-rb-idx="${bi}" data-rb-row="${ri}" data-rb-field="label" onmousedown="onRepairBlockRowMouseDown('${cid}', ${bi}, ${ri})" onclick="onRepairEditableClick(event, function(){ startRepairBlockCellEdit('${cid}', ${bi}, ${ri}, 'label'); })"`
+            : `class="rb-cell rb-cell-label"`;
+          const cntAttrs = inline
+            ? `class="rb-cell rb-cell-content rb-editable" data-rb-idx="${bi}" data-rb-row="${ri}" data-rb-field="content" onmousedown="onRepairBlockRowMouseDown('${cid}', ${bi}, ${ri})" onclick="onRepairEditableClick(event, function(){ startRepairBlockCellEdit('${cid}', ${bi}, ${ri}, 'content'); })"`
+            : `class="rb-cell rb-cell-content"`;
+
+          return `
+            <tr class="rb-row" data-rb-idx="${bi}" data-rb-row="${ri}">
+              <td class="rb-td-label">
+                <div ${lblAttrs}>${lblHtml}</div>
+                ${inline ? `<button type="button" class="rb-row-del-btn rb-row-del-mobile" onmousedown="event.preventDefault()" onclick="deleteRepairBlockRowInline('${cid}', ${bi}, ${ri}, event)" title="${isEn ? 'Delete row' : 'Xóa dòng'}" aria-label="${isEn ? 'Delete row' : 'Xóa dòng'}">${_rbSvgClose()}</button>` : ''}
+              </td>
+              <td class="rb-td-content"><div ${cntAttrs}>${cntHtml}</div></td>
+              ${inline ? `<td class="rb-td-del"><button type="button" class="rb-row-del-btn" onmousedown="event.preventDefault()" onclick="deleteRepairBlockRowInline('${cid}', ${bi}, ${ri}, event)" title="${isEn ? 'Delete row' : 'Xóa dòng'}" aria-label="${isEn ? 'Delete row' : 'Xóa dòng'}">${_rbSvgClose()}</button></td>` : ''}
+            </tr>`;
+        }).join('')
+      : (inline ? `
+          <tr class="rb-empty-row">
+            <td colspan="3">
+              <button type="button" class="rb-empty-row-btn" onmousedown="event.preventDefault()" onclick="addRepairBlockRowInline('${cid}', ${bi})">
+                ${_rbSvgPlus()}
+                <span>${isEn ? 'Add first row...' : 'Chạm để thêm dòng đầu tiên...'}</span>
+              </button>
+            </td>
+          </tr>` : '');
+
+    const titleAttrs = inline
+      ? `class="rb-title rb-editable" data-rb-title="${bi}" onmousedown="onRepairBlockElementMouseDown('${cid}', ${bi})" onclick="onRepairEditableClick(event, function(){ startRepairBlockTitleEdit('${cid}', ${bi}); })"`
+      : `class="rb-title"`;
+
+    return `
+      <div class="rb-block" data-rb-idx="${bi}" data-rb-id="${escapeHtml(blk.id || '')}">
+        <div class="rb-head">
+          <div class="rb-title-host" data-rb-title-host="${bi}">
+            <div ${titleAttrs}>${blkTitle ? escapeHtml(blkTitle) : `<span class="rb-title-empty">${escapeHtml(untitledPh)}</span>`}</div>
+          </div>
+          <div class="rb-head-acts">
+            <span class="rep-save-st" data-save-st="rb-${bi}"></span>
+            <button type="button" class="btn btn-sm rb-bi-btn" data-rb-bi-btn="${escapeHtml(blkDomKey)}" onmousedown="event.preventDefault()" onclick="toggleRepairBlockBilingual('${cid}', ${bi})" title="${isEn ? 'Translate this section VI ⇄ EN' : 'Đối chiếu Song ngữ Việt ⇄ Anh mục này'}">
+              ${_rbSvgBilingual()}
+              <span>${isEn ? 'Bilingual' : 'Song ngữ'}</span>
+            </button>
+            ${inline ? `<button type="button" class="btn btn-sm btn-primary rb-add-row-btn" onmousedown="event.preventDefault()" onclick="addRepairBlockRowInline('${cid}', ${bi})">${_rbSvgPlus()}<span>${isEn ? 'Add row' : 'Thêm dòng'}</span></button>` : ''}
+            ${inline ? `<button type="button" class="btn btn-sm btn-danger rb-del-btn" onmousedown="event.preventDefault()" onclick="deleteRepairBlockInline('${cid}', ${bi})" title="${isEn ? 'Delete section' : 'Xóa mục này'}">${_rbSvgClose()}<span>${isEn ? 'Delete' : 'Xóa mục'}</span></button>` : ''}
+          </div>
+        </div>
+        <div id="${escapeHtml(blkDomKey)}" class="bilingual-sec-wrap rb-bilingual hidden"></div>
+        <div class="rb-table-wrap">
+          <table class="rb-table">
+            <colgroup>
+              <col class="rb-col-label" />
+              <col class="rb-col-content" />
+              ${inline ? '<col class="rb-col-del" />' : ''}
+            </colgroup>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }).join('');
 
   return `
-    <div class="sec-head">
-      <span class="sec-title">QUY TRÌNH BẮT BỆNH &amp; XỬ LÝ (${pad2(steps.length)} BƯỚC)</span>
-      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-        <button type="button" class="btn btn-sm" onclick="toggleCurrentRecordBilingual('repair', '${cid}')" title="Đối chiếu Song ngữ Việt ⇄ Anh ca sửa này">🇬🇧 Song ngữ</button>
-        ${inline ? `<button type="button" class="btn btn-sm btn-primary" onclick="addRepairStepInline('${cid}')">+ Thêm bước kiểm tra</button>` : ''}
-      </div>
-    </div>
-    <div class="trace">${traceHtml}</div>`;
+    <div class="rb-list">${blocksHtml}</div>
+    ${inline ? `
+      <div class="rb-add-block-bar">
+        <button type="button" class="rb-add-block-btn" onmousedown="event.preventDefault()" onclick="addRepairBlockInline('${cid}')">
+          ${_rbSvgPlus()}
+          <span>${isEn ? 'Add Section' : 'Thêm mục mới'}</span>
+        </button>
+      </div>` : ''}`;
 }
 
 function buildRepairDetailHtml(c, opts = {}) {
@@ -566,6 +761,7 @@ function buildRepairDetailHtml(c, opts = {}) {
   const inline = opts.inline !== undefined ? opts.inline : (pane !== 'secondary');
   const cid = escapeHtml(c.id);
   const coldHtml = renderRepairColdCheckBlockHtml(c, inline);
+  const blocksHtml = renderRepairBlocksSectionHtml(c, inline);
   const noteHtml = renderRepairNoteBlockHtml(c, inline);
 
   return `
@@ -599,9 +795,7 @@ function buildRepairDetailHtml(c, opts = {}) {
 
       ${coldHtml ? `<div class="sec rep-cold-host" data-rep-block="cold">${coldHtml}</div>` : ''}
 
-      <div class="sec rep-steps-sec" data-rep-block="steps">
-        ${renderRepairStepsSectionInnerHtml(c, inline)}
-      </div>
+      ${blocksHtml ? `<div class="sec rep-blocks-host" data-rep-block="blocks">${blocksHtml}</div>` : ''}
 
       ${noteHtml ? `<div class="sec rep-note-host" data-rep-block="note">${noteHtml}</div>` : ''}
 
@@ -676,6 +870,30 @@ function _restoreFieldHost(ed, c, overrideVal = null) {
   if (ed.target === 'note') {
     const noteHost = document.querySelector('#repair-detail .rep-note-host');
     if (noteHost) noteHost.innerHTML = renderRepairNoteBlockHtml({ ...c, note: val }, true);
+    return;
+  }
+  if (ed.target === 'rb-title' && ed.hostEl) {
+    const cid = escapeHtml(c.id);
+    const bi = ed.blkIdx;
+    const isEn = _repairIsEnLang();
+    const untitledPh = isEn ? 'Untitled section (click to edit)' : 'Chưa đặt tên mục (chạm để sửa)';
+    const cleanTitle = String(val || '').trim();
+    delete ed.hostEl.dataset.viHtmlOrig;
+    delete ed.hostEl.dataset.viTextOrig;
+    ed.hostEl.classList.remove('rep-inline-editing');
+    ed.hostEl.innerHTML = `<div class="rb-title rb-editable" data-rb-title="${bi}" onmousedown="onRepairBlockElementMouseDown('${cid}', ${bi})" onclick="onRepairEditableClick(event, function(){ startRepairBlockTitleEdit('${cid}', ${bi}); })">${cleanTitle ? escapeHtml(cleanTitle) : `<span class="rb-title-empty">${escapeHtml(untitledPh)}</span>`}</div>`;
+    return;
+  }
+  if (ed.target === 'rb-cell' && ed.hostEl) {
+    const isEn = _repairIsEnLang();
+    const ph = ed.field === 'label'
+      ? (isEn ? 'Item / Test point...' : 'Hạng mục / Điểm đo...')
+      : (isEn ? 'Details / Result...' : 'Nội dung / Kết quả đo...');
+    delete ed.hostEl.dataset.viHtmlOrig;
+    delete ed.hostEl.dataset.viTextOrig;
+    ed.hostEl.classList.remove('rep-inline-editing');
+    ed.hostEl.classList.add('rb-editable');
+    ed.hostEl.innerHTML = _repairBlockCellHtml(val, c, ph);
     return;
   }
   if (ed.target === 'step' && ed.hostEl) {
@@ -1312,27 +1530,538 @@ async function startRepairNoteEdit(caseId) {
   });
 }
 
-async function startRepairStepFieldEdit(caseId, stepIdx, field) {
-  const cur = state.repairInlineEdit;
-  if (cur && cur.caseId === caseId && cur.target === 'step' && cur.stepIdx === stepIdx && cur.field === field) return;
-  if (cur) await commitActiveRepairInlineEdit();
-  const c = _getRepairCaseById(caseId);
-  const hostEl = document.querySelector(`#repair-detail .spec-v[data-step-idx="${stepIdx}"][data-step-field="${field}"]`);
-  if (!c || !hostEl) return;
-  const steps = _getDisplayStepsForCase(c);
-  const st = steps[stepIdx];
-  if (!st) return;
-  const orig = st[field] || '';
-  const phMap = _repairIsEnLang()
-    ? { symptom: 'Symptom / Test point...', root_cause: 'Root cause...', solution: 'Solution & Components...' }
-    : { symptom: 'Hiện tượng / Điểm đo...', root_cause: 'Nguyên nhân gốc rễ...', solution: 'Cách xử lý & Linh kiện...' };
-  state.repairInlineEdit = { caseId, target: 'step', stepIdx, field, origValue: orig, hostEl, saving: false, cancelling: false };
-  _mountRepairInlineEditor(hostEl, {
-    target: 'step',
-    rows: 3,
-    initialValue: orig,
-    placeholder: phMap[field] || '',
+function onRepairBlockElementMouseDown(caseId, blkIdx) {
+  const ed = state.repairInlineEdit;
+  if (ed && ed.caseId === caseId && (ed.target === 'rb-title' || ed.target === 'rb-cell') && ed.blkIdx === blkIdx) {
+    ed._movingWithinBlock = true;
+  }
+}
+
+function onRepairBlockRowMouseDown(caseId, blkIdx, rowIdx) {
+  const ed = state.repairInlineEdit;
+  if (ed && ed.caseId === caseId && (ed.target === 'rb-title' || ed.target === 'rb-cell') && ed.blkIdx === blkIdx) {
+    ed._movingWithinBlock = true;
+    if (ed.target === 'rb-cell' && ed.rowIdx === rowIdx) {
+      ed._movingWithinRow = true;
+    }
+  }
+}
+
+function _removeDraftRepairBlock(caseId, blkId) {
+  const caseDraft = state.repairDraftBlocks?.[caseId];
+  if (!caseDraft || !Array.isArray(caseDraft.blocks)) return false;
+  const idx = caseDraft.blocks.findIndex((b) => b.id === blkId);
+  if (idx < 0) return false;
+  caseDraft.blocks.splice(idx, 1);
+  if (!caseDraft.blocks.length && (!caseDraft.rows || !Object.keys(caseDraft.rows).length)) {
+    delete state.repairDraftBlocks[caseId];
+  }
+  return true;
+}
+
+function _removeDraftRepairRow(caseId, blkId, blkIsDraft, rowId) {
+  const caseDraft = state.repairDraftBlocks?.[caseId];
+  if (!caseDraft) return false;
+  if (blkIsDraft && Array.isArray(caseDraft.blocks)) {
+    const blk = caseDraft.blocks.find((b) => b.id === blkId);
+    if (!blk) return false;
+    const rIdx = (blk.rows || []).findIndex((r) => r.id === rowId);
+    if (rIdx >= 0) blk.rows.splice(rIdx, 1);
+    const hasTitle = Boolean(String(blk.title || '').trim());
+    const hasRows = (blk.rows || []).some((r) => String(r.label || '').trim() || String(r.content || '').trim());
+    if (!hasTitle && !hasRows && (!blk.rows || !blk.rows.length)) {
+      _removeDraftRepairBlock(caseId, blkId);
+    }
+    return true;
+  }
+  if (caseDraft.rows && Array.isArray(caseDraft.rows[blkId])) {
+    const arr = caseDraft.rows[blkId];
+    const rIdx = arr.findIndex((r) => r.id === rowId);
+    if (rIdx >= 0) {
+      arr.splice(rIdx, 1);
+      if (!arr.length) delete caseDraft.rows[blkId];
+      if (!caseDraft.blocks?.length && !Object.keys(caseDraft.rows).length) {
+        delete state.repairDraftBlocks[caseId];
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+function _normalizeBlocksForSaveWithTracking(displayBlocks, trackBlkIdx = -1, trackRowIdx = -1, patcher = null) {
+  const normalized = [];
+  let savedBlkIdx = -1;
+  let savedRowIdx = -1;
+  displayBlocks.forEach((b, bi) => {
+    const srcBlk = patcher ? patcher(b, bi) : b;
+    const title = String(srcBlk.title || '').trim();
+    const rawRows = Array.isArray(srcBlk.rows) ? srcBlk.rows : [];
+    const normRows = [];
+    let trackedRowHere = -1;
+    rawRows.forEach((r, ri) => {
+      const label = String(r.label || '').trim();
+      const content = String(r.content || '').trim();
+      if (!label && !content) return;
+      let rid = String(r.id || '').trim();
+      if (!rid || rid.startsWith('row-draft-')) {
+        rid = `row-${normRows.length + 1}`;
+      }
+      if (bi === trackBlkIdx && ri === trackRowIdx) {
+        trackedRowHere = normRows.length;
+      }
+      normRows.push({ id: rid, label, content });
+    });
+    if (!title && !normRows.length) return;
+    let bid = String(srcBlk.id || '').trim();
+    if (!bid || bid.startsWith('blk-draft-')) {
+      bid = `blk-${normalized.length + 1}`;
+    }
+    if (bi === trackBlkIdx) {
+      savedBlkIdx = normalized.length;
+      savedRowIdx = trackedRowHere;
+    }
+    normalized.push({ id: bid, title, rows: normRows });
   });
+  return { blocks: normalized, savedBlkIdx, savedRowIdx };
+}
+
+async function startRepairBlockTitleEdit(caseId, blkIdx) {
+  const cur = state.repairInlineEdit;
+  if (cur && cur.caseId === caseId && cur.target === 'rb-title' && cur.blkIdx === blkIdx) return;
+  if (cur) {
+    const keepSameBlock = Boolean(cur.caseId === caseId && (cur.target === 'rb-title' || cur.target === 'rb-cell') && cur.blkIdx === blkIdx);
+    await commitActiveRepairInlineEdit({ keepBlankDraft: keepSameBlock, keepBlankDraftRow: keepSameBlock });
+  }
+
+  const c = _getRepairCaseById(caseId);
+  if (!c) return;
+  const blocks = _getDisplayRepairBlocksForCase(c);
+  const blk = blocks[blkIdx];
+  const hostEl = document.querySelector(`#repair-detail .rb-block[data-rb-idx="${blkIdx}"] .rb-title-host`);
+  if (!blk || !hostEl) return;
+
+  const pane = document.getElementById('repair-detail');
+  const savedScroll = pane ? pane.scrollTop : 0;
+  const orig = String(blk.title || '');
+  const isEn = _repairIsEnLang();
+  const ph = isEn
+    ? 'Section title (e.g. SMPS & DC BUS TEST)...'
+    : 'Tên mục lớn (VD: TEST NGUỒN XUNG & CẤP DC BUS)...';
+
+  delete hostEl.dataset.viHtmlOrig;
+  delete hostEl.dataset.viTextOrig;
+  hostEl.classList.add('rep-inline-editing');
+
+  state.repairInlineEdit = {
+    caseId,
+    target: 'rb-title',
+    stepIdx: -1,
+    blkIdx,
+    blkId: blk.id || '',
+    isDraftBlock: Boolean(blk._isDraft),
+    field: 'title',
+    origValue: orig,
+    hostEl,
+    saving: false,
+    cancelling: false,
+    _movingWithinBlock: false,
+    _movingWithinRow: false,
+    _handledKeyAction: false,
+  };
+
+  hostEl.innerHTML = `<input type="text" class="inp rb-title-inp" spellcheck="false" placeholder="${escapeHtml(ph)}" />`;
+  const inp = hostEl.querySelector('.rb-title-inp');
+  inp.value = orig;
+  inp.focus({ preventScroll: true });
+  try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (_) {}
+
+  inp.addEventListener('keydown', async (e) => {
+    const ed = state.repairInlineEdit;
+    if (!ed || ed.hostEl !== hostEl) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      ed._handledKeyAction = true;
+      cancelActiveRepairInlineEdit();
+      return;
+    }
+    if ((e.key === 'Tab' && !e.shiftKey) || (e.key === 'Enter' && !e.shiftKey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      ed._handledKeyAction = true;
+      await commitActiveRepairInlineEdit({
+        keepBlankDraft: true,
+        jumpToFirstRow: { caseId, blkIdx },
+      });
+    }
+  });
+  inp.addEventListener('blur', () => {
+    const ed = state.repairInlineEdit;
+    if (!ed || ed.hostEl !== hostEl || ed.cancelling || ed.saving || ed._handledKeyAction) return;
+    commitActiveRepairInlineEdit({ keepBlankDraft: Boolean(ed._movingWithinBlock) });
+  });
+
+  if (pane) pane.scrollTop = savedScroll;
+}
+
+async function startRepairBlockCellEdit(caseId, blkIdx, rowIdx, field) {
+  const cur = state.repairInlineEdit;
+  if (cur && cur.caseId === caseId && cur.target === 'rb-cell' && cur.blkIdx === blkIdx && cur.rowIdx === rowIdx && cur.field === field) {
+    return;
+  }
+  if (cur) {
+    const sameRow = Boolean(cur.caseId === caseId && cur.target === 'rb-cell' && cur.blkIdx === blkIdx && cur.rowIdx === rowIdx && cur.field !== field);
+    const sameBlock = Boolean(cur.caseId === caseId && (cur.target === 'rb-title' || cur.target === 'rb-cell') && cur.blkIdx === blkIdx);
+    await commitActiveRepairInlineEdit({ keepBlankDraftRow: sameRow || sameBlock, keepBlankDraft: sameBlock });
+  }
+
+  const c = _getRepairCaseById(caseId);
+  if (!c) return;
+  const blocks = _getDisplayRepairBlocksForCase(c);
+  const blk = blocks[blkIdx];
+  const row = blk?.rows?.[rowIdx];
+  const hostEl = document.querySelector(`#repair-detail .rb-cell[data-rb-idx="${blkIdx}"][data-rb-row="${rowIdx}"][data-rb-field="${field}"]`);
+  if (!blk || !row || !hostEl) return;
+
+  const pane = document.getElementById('repair-detail');
+  const savedScroll = pane ? pane.scrollTop : 0;
+  const orig = String(row[field] || '');
+  const isEn = _repairIsEnLang();
+
+  delete hostEl.dataset.viHtmlOrig;
+  delete hostEl.dataset.viTextOrig;
+  hostEl.classList.remove('rb-editable');
+  hostEl.classList.add('rep-inline-editing');
+
+  state.repairInlineEdit = {
+    caseId,
+    target: 'rb-cell',
+    stepIdx: -1,
+    blkIdx,
+    blkId: blk.id || '',
+    isDraftBlock: Boolean(blk._isDraft),
+    rowIdx,
+    rowId: row.id || '',
+    isDraft: Boolean(row._isDraft),
+    field,
+    origValue: orig,
+    hostEl,
+    saving: false,
+    cancelling: false,
+    _movingWithinBlock: false,
+    _movingWithinRow: false,
+    _handledKeyAction: false,
+  };
+
+  if (field === 'label') {
+    const ph = isEn ? 'Item / Test point...' : 'Hạng mục / Điểm đo...';
+    hostEl.innerHTML = `<input type="text" class="inp rb-inline-inp" spellcheck="false" placeholder="${escapeHtml(ph)}" />`;
+    const inp = hostEl.querySelector('.rb-inline-inp');
+    inp.value = orig;
+    inp.focus({ preventScroll: true });
+    try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (_) {}
+
+    inp.addEventListener('keydown', async (e) => {
+      const ed = state.repairInlineEdit;
+      if (!ed || ed.hostEl !== hostEl) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        ed._handledKeyAction = true;
+        cancelActiveRepairInlineEdit();
+        return;
+      }
+      if ((e.key === 'Tab' && !e.shiftKey) || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault();
+        e.stopPropagation();
+        ed._handledKeyAction = true;
+        await commitActiveRepairInlineEdit({
+          keepBlankDraftRow: true,
+          keepBlankDraft: true,
+          nextCell: { caseId, blkIdx, rowIdx, field: 'content' },
+        });
+      }
+    });
+    inp.addEventListener('blur', () => {
+      const ed = state.repairInlineEdit;
+      if (!ed || ed.hostEl !== hostEl || ed.cancelling || ed.saving || ed._handledKeyAction) return;
+      commitActiveRepairInlineEdit({
+        keepBlankDraftRow: Boolean(ed._movingWithinRow || ed._movingWithinBlock),
+        keepBlankDraft: Boolean(ed._movingWithinBlock),
+      });
+    });
+  } else {
+    const ph = isEn
+      ? 'Content / Measurements (Enter newline, Ctrl+Enter add row)...'
+      : 'Nội dung / Kết quả (Enter xuống dòng, Ctrl+Enter thêm dòng)...';
+    hostEl.innerHTML = `<textarea class="inp rb-inline-ta" rows="2" spellcheck="false" placeholder="${escapeHtml(ph)}"></textarea>`;
+    const ta = hostEl.querySelector('.rb-inline-ta');
+    ta.value = orig;
+    _autoResizeRepairTextarea(ta, 42);
+    ta.focus({ preventScroll: true });
+    try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch (_) {}
+
+    ta.addEventListener('input', () => _autoResizeRepairTextarea(ta, 42));
+    ta.addEventListener('keydown', async (e) => {
+      const ed = state.repairInlineEdit;
+      if (!ed || ed.hostEl !== hostEl) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        ed._handledKeyAction = true;
+        cancelActiveRepairInlineEdit();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        ed._handledKeyAction = true;
+        await commitActiveRepairInlineEdit({
+          addRowAfter: { caseId, blkIdx, afterIdx: rowIdx },
+        });
+      }
+    });
+    ta.addEventListener('blur', () => {
+      const ed = state.repairInlineEdit;
+      if (!ed || ed.hostEl !== hostEl || ed.cancelling || ed.saving || ed._handledKeyAction) return;
+      commitActiveRepairInlineEdit({
+        keepBlankDraftRow: Boolean(ed._movingWithinRow || ed._movingWithinBlock),
+        keepBlankDraft: Boolean(ed._movingWithinBlock),
+      });
+    });
+  }
+
+  if (pane) pane.scrollTop = savedScroll;
+}
+
+async function addRepairBlockInline(caseId) {
+  if (state.repairInlineEdit) {
+    await commitActiveRepairInlineEdit();
+  }
+  const c = _getRepairCaseById(caseId);
+  if (!c) return;
+  const pane = document.getElementById('repair-detail');
+  const savedScroll = pane ? pane.scrollTop : 0;
+
+  state.repairDraftBlocks[caseId] = state.repairDraftBlocks[caseId] || { blocks: [], rows: {} };
+  const stamp = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  const draftBlkId = `blk-draft-${stamp}`;
+  const draftRowId = `row-draft-${stamp}`;
+  state.repairDraftBlocks[caseId].blocks.push({
+    id: draftBlkId,
+    title: '',
+    rows: [{ id: draftRowId, label: '', content: '', _isDraft: true }],
+    _isDraft: true,
+  });
+
+  const blocksHost = document.querySelector('#repair-detail .rep-blocks-host');
+  if (blocksHost) blocksHost.innerHTML = renderRepairBlocksSectionHtml(c, true);
+  if (pane) pane.scrollTop = savedScroll;
+
+  const displayBlocks = _getDisplayRepairBlocksForCase(c);
+  const targetIdx = Math.max(0, displayBlocks.findIndex((b) => b.id === draftBlkId));
+  await startRepairBlockTitleEdit(caseId, targetIdx);
+  const blkEl = document.querySelector(`#repair-detail .rb-block[data-rb-idx="${targetIdx}"]`);
+  if (blkEl && typeof blkEl.scrollIntoView === 'function') {
+    blkEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+  if (_repairIsEnLang() && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
+}
+
+async function addRepairBlockRowInline(caseId, blkIdx, autoFocus = true, insertAt = null) {
+  if (state.repairInlineEdit) {
+    const ed = state.repairInlineEdit;
+    const sameBlock = Boolean(ed.caseId === caseId && (ed.target === 'rb-title' || ed.target === 'rb-cell') && ed.blkIdx === blkIdx);
+    await commitActiveRepairInlineEdit({ keepBlankDraft: sameBlock });
+  }
+  const c = _getRepairCaseById(caseId);
+  if (!c) return;
+  const pane = document.getElementById('repair-detail');
+  const savedScroll = pane ? pane.scrollTop : 0;
+
+  const displayBlocks = _getDisplayRepairBlocksForCase(c);
+  const blk = displayBlocks[blkIdx];
+  if (!blk) return;
+
+  const draftRowId = `row-draft-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  let targetRowIdx = 0;
+
+  state.repairDraftBlocks[caseId] = state.repairDraftBlocks[caseId] || { blocks: [], rows: {} };
+  if (blk._isDraft) {
+    const dBlk = (state.repairDraftBlocks[caseId].blocks || []).find((b) => b.id === blk.id);
+    if (dBlk) {
+      dBlk.rows = dBlk.rows || [];
+      const pos = typeof insertAt === 'number' ? Math.max(0, Math.min(insertAt, dBlk.rows.length)) : dBlk.rows.length;
+      dBlk.rows.splice(pos, 0, { id: draftRowId, label: '', content: '', _isDraft: true });
+      targetRowIdx = pos;
+    }
+  } else {
+    state.repairDraftBlocks[caseId].rows = state.repairDraftBlocks[caseId].rows || {};
+    state.repairDraftBlocks[caseId].rows[blk.id] = state.repairDraftBlocks[caseId].rows[blk.id] || [];
+    const savedRowsLen = (_resolveRepairBlocksForCase(c).find((x) => x.id === blk.id)?.rows || []).length;
+    const safeInsert = typeof insertAt === 'number' ? Math.max(0, Math.min(insertAt, savedRowsLen)) : null;
+    state.repairDraftBlocks[caseId].rows[blk.id].push({
+      id: draftRowId,
+      label: '',
+      content: '',
+      _isDraft: true,
+      _insertAt: safeInsert,
+    });
+  }
+
+  const blocksHost = document.querySelector('#repair-detail .rep-blocks-host');
+  if (blocksHost) blocksHost.innerHTML = renderRepairBlocksSectionHtml(c, true);
+  if (pane) pane.scrollTop = savedScroll;
+
+  if (!blk._isDraft) {
+    const nextDisplay = _getDisplayRepairBlocksForCase(c);
+    const nBlk = nextDisplay[blkIdx];
+    targetRowIdx = Math.max(0, (nBlk?.rows || []).findIndex((r) => r.id === draftRowId));
+  }
+  if (autoFocus) {
+    await startRepairBlockCellEdit(caseId, blkIdx, targetRowIdx, 'label');
+  }
+  if (_repairIsEnLang() && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
+}
+
+async function deleteRepairBlockRowInline(caseId, blkIdx, rowIdx, event) {
+  if (event) event.stopPropagation();
+  const curEd = state.repairInlineEdit;
+  if (curEd && curEd.caseId === caseId && curEd.target === 'rb-cell' && curEd.blkIdx === blkIdx && curEd.rowIdx === rowIdx) {
+    curEd.cancelling = true;
+    state.repairInlineEdit = null;
+  } else if (curEd) {
+    await commitActiveRepairInlineEdit();
+  }
+
+  const c = _getRepairCaseById(caseId);
+  if (!c) return;
+  const pane = document.getElementById('repair-detail');
+  const savedScroll = pane ? pane.scrollTop : 0;
+
+  const displayBlocks = _getDisplayRepairBlocksForCase(c);
+  const blk = displayBlocks[blkIdx];
+  const targetRow = blk?.rows?.[rowIdx];
+  if (!blk || !targetRow) return;
+
+  if (targetRow._isDraft) {
+    _removeDraftRepairRow(caseId, blk.id, Boolean(blk._isDraft), targetRow.id);
+    const blocksHost = document.querySelector('#repair-detail .rep-blocks-host');
+    if (blocksHost) blocksHost.innerHTML = renderRepairBlocksSectionHtml(c, true);
+    if (pane) pane.scrollTop = savedScroll;
+    if (_repairIsEnLang() && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
+    return;
+  }
+
+  const rollback = _cloneRepairBackup(c);
+  const { blocks: nextSaved } = _normalizeBlocksForSaveWithTracking(displayBlocks, blkIdx, -1, (b, bi) => {
+    if (bi !== blkIdx) return b;
+    return { ...b, rows: (b.rows || []).filter((_, ri) => ri !== rowIdx) };
+  });
+
+  if (state.repairDraftBlocks && state.repairDraftBlocks[caseId]) {
+    delete state.repairDraftBlocks[caseId];
+  }
+  c.repair_blocks_json = nextSaved;
+  c.fault_symptom_raw = _serializeRepairBlocksJS(nextSaved);
+  c.root_cause_raw = '';
+  c.solution_raw = '';
+  c.steps = [];
+
+  const blocksHost = document.querySelector('#repair-detail .rep-blocks-host');
+  if (blocksHost) blocksHost.innerHTML = renderRepairBlocksSectionHtml(c, true);
+  if (pane) pane.scrollTop = savedScroll;
+
+  await patchRepairCaseInline(caseId, { repair_blocks_json: nextSaved }, `rb-${blkIdx}`, { reRenderBlocks: true, rollback });
+}
+
+async function deleteRepairBlockInline(caseId, blkIdx) {
+  const curEd = state.repairInlineEdit;
+  if (curEd && curEd.caseId === caseId && (curEd.target === 'rb-title' || curEd.target === 'rb-cell') && curEd.blkIdx === blkIdx) {
+    curEd.cancelling = true;
+    state.repairInlineEdit = null;
+  } else if (curEd) {
+    await commitActiveRepairInlineEdit();
+  }
+
+  const c = _getRepairCaseById(caseId);
+  if (!c) return;
+  const displayBlocks = _getDisplayRepairBlocksForCase(c);
+  const targetBlk = displayBlocks[blkIdx];
+  if (!targetBlk) return;
+
+  const isEn = _repairIsEnLang();
+  const hasContent = Boolean(String(targetBlk.title || '').trim())
+    || (targetBlk.rows || []).some((r) => String(r.label || '').trim() || String(r.content || '').trim());
+  const lbl = String(targetBlk.title || '').trim() || (isEn ? `Section ${blkIdx + 1}` : `Mục ${blkIdx + 1}`);
+  if (hasContent && !await uiConfirm(isEn ? `Delete section "${lbl}"?` : `Xóa mục "${lbl}" và toàn bộ dòng bên trong?`)) {
+    return;
+  }
+
+  const pane = document.getElementById('repair-detail');
+  const savedScroll = pane ? pane.scrollTop : 0;
+
+  if (targetBlk._isDraft) {
+    _removeDraftRepairBlock(caseId, targetBlk.id);
+    const blocksHost = document.querySelector('#repair-detail .rep-blocks-host');
+    if (blocksHost) blocksHost.innerHTML = renderRepairBlocksSectionHtml(c, true);
+    if (pane) pane.scrollTop = savedScroll;
+    if (isEn && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
+    return;
+  }
+
+  const rollback = _cloneRepairBackup(c);
+  const remaining = displayBlocks.filter((_, bi) => bi !== blkIdx);
+  const { blocks: nextSaved } = _normalizeBlocksForSaveWithTracking(remaining);
+
+  if (state.repairDraftBlocks && state.repairDraftBlocks[caseId]) {
+    delete state.repairDraftBlocks[caseId];
+  }
+  c.repair_blocks_json = nextSaved;
+  c.fault_symptom_raw = _serializeRepairBlocksJS(nextSaved);
+  c.root_cause_raw = '';
+  c.solution_raw = '';
+  c.steps = [];
+
+  const blocksHost = document.querySelector('#repair-detail .rep-blocks-host');
+  if (blocksHost) blocksHost.innerHTML = renderRepairBlocksSectionHtml(c, true);
+  if (pane) pane.scrollTop = savedScroll;
+
+  await patchRepairCaseInline(caseId, { repair_blocks_json: nextSaved }, 'rb-0', { reRenderBlocks: true, rollback });
+  showToast(isEn ? `Deleted section "${lbl}"` : `Đã xóa mục "${lbl}"`, 'success');
+}
+
+async function toggleRepairBlockBilingual(caseId, blkIdx) {
+  if (state.repairInlineEdit) {
+    await commitActiveRepairInlineEdit();
+  }
+  const c = _getRepairCaseById(caseId);
+  if (!c) return;
+  const blocks = _getDisplayRepairBlocksForCase(c);
+  const blk = blocks[blkIdx];
+  if (!blk) return;
+
+  const lines = [];
+  if (String(blk.title || '').trim()) lines.push(String(blk.title).trim());
+  (blk.rows || []).forEach((r) => {
+    const lbl = String(r.label || '').trim();
+    const cnt = String(r.content || '').trim();
+    if (lbl && cnt) lines.push(`${lbl}: ${cnt}`);
+    else if (lbl || cnt) lines.push(lbl || cnt);
+  });
+
+  const hostId = `rb-bilingual-${caseId}-${blkIdx}`;
+  const btn = document.querySelector(`#repair-detail [data-rb-bi-btn="${CSS.escape(hostId)}"]`);
+  if (typeof _toggleCustomHostBilingual === 'function') {
+    await _toggleCustomHostBilingual(hostId, `${c.id} · ${blk.title || `Mục ${blkIdx + 1}`}`, lines, c.id);
+    const hostEl = document.getElementById(hostId);
+    if (btn && hostEl) btn.classList.toggle('split-on', !hostEl.classList.contains('hidden'));
+  }
+}
+
+async function startRepairStepFieldEdit(caseId, stepIdx, field) {
+  return;
 }
 
 function cancelActiveRepairInlineEdit() {
@@ -1359,6 +2088,28 @@ function cancelActiveRepairInlineEdit() {
         if (!dList.length) delete state.repairDraftColdRows[ed.caseId];
         const coldHost = document.querySelector('#repair-detail .rep-cold-host');
         if (coldHost) coldHost.innerHTML = renderRepairColdCheckBlockHtml(c, true);
+      } else {
+        _restoreFieldHost(ed, c, ed.origValue);
+      }
+    } else if (ed.target === 'rb-title' && ed.isDraftBlock) {
+      const blocks = _getDisplayRepairBlocksForCase(c);
+      const blk = blocks[ed.blkIdx];
+      const hasRows = (blk?.rows || []).some((r) => String(r.label || '').trim() || String(r.content || '').trim());
+      if (blk && !String(blk.title || '').trim() && !hasRows) {
+        _removeDraftRepairBlock(ed.caseId, blk.id);
+        const blocksHost = document.querySelector('#repair-detail .rep-blocks-host');
+        if (blocksHost) blocksHost.innerHTML = renderRepairBlocksSectionHtml(c, true);
+      } else {
+        _restoreFieldHost(ed, c, ed.origValue);
+      }
+    } else if (ed.target === 'rb-cell' && ed.isDraft) {
+      const blocks = _getDisplayRepairBlocksForCase(c);
+      const blk = blocks[ed.blkIdx];
+      const row = blk?.rows?.[ed.rowIdx];
+      if (blk && row && !String(row.label || '').trim() && !String(row.content || '').trim()) {
+        _removeDraftRepairRow(ed.caseId, blk.id, Boolean(blk._isDraft), row.id);
+        const blocksHost = document.querySelector('#repair-detail .rep-blocks-host');
+        if (blocksHost) blocksHost.innerHTML = renderRepairBlocksSectionHtml(c, true);
       } else {
         _restoreFieldHost(ed, c, ed.origValue);
       }
@@ -1394,6 +2145,10 @@ function _cloneRepairBackup(c) {
       ...r,
       ...(Array.isArray(r.caps) ? { caps: _cloneCapItemsJS(r.caps) } : {}),
     })),
+    repair_blocks_json: _resolveRepairBlocksForCase(c).map((b) => ({
+      ...b,
+      rows: (b.rows || []).map((r) => ({ ...r })),
+    })),
     note: c.note || '',
     fault_symptom_raw: c.fault_symptom_raw || '',
     root_cause_raw: c.root_cause_raw || '',
@@ -1412,6 +2167,10 @@ function _applyRepairBackup(c, backup) {
     cold_check_json: (backup.cold_check_json || []).map((r) => ({
       ...r,
       ...(Array.isArray(r.caps) ? { caps: _cloneCapItemsJS(r.caps) } : {}),
+    })),
+    repair_blocks_json: (backup.repair_blocks_json || []).map((b) => ({
+      ...b,
+      rows: (b.rows || []).map((r) => ({ ...r })),
     })),
     note: backup.note,
     fault_symptom_raw: backup.fault_symptom_raw,
@@ -1526,6 +2285,198 @@ async function commitActiveRepairInlineEdit(options = {}) {
     return;
   }
 
+  if (ed.target === 'rb-title') {
+    const inp = ed.hostEl?.querySelector('.rb-title-inp');
+    const nextVal = String(inp ? inp.value : '').trim();
+    const origVal = String(ed.origValue || '').trim();
+    state.repairInlineEdit = null;
+    const c = _getRepairCaseById(ed.caseId);
+    if (!c) return;
+
+    const displayBlocks = _getDisplayRepairBlocksForCase(c);
+    const targetBlk = displayBlocks[ed.blkIdx];
+    if (!targetBlk) return;
+
+    const hasContentRows = (targetBlk.rows || []).some((r) => String(r.label || '').trim() || String(r.content || '').trim());
+    if (!nextVal && targetBlk._isDraft && !hasContentRows) {
+      if (options.keepBlankDraft || options.jumpToFirstRow) {
+        _restoreFieldHost(ed, c, nextVal);
+        if (options.jumpToFirstRow) {
+          await startRepairBlockCellEdit(ed.caseId, ed.blkIdx, 0, 'label');
+        }
+        if (pane) pane.scrollTop = savedScroll;
+        return;
+      }
+      _removeDraftRepairBlock(ed.caseId, targetBlk.id);
+      const blocksHost = document.querySelector('#repair-detail .rep-blocks-host');
+      if (blocksHost) blocksHost.innerHTML = renderRepairBlocksSectionHtml(c, true);
+      if (pane) pane.scrollTop = savedScroll;
+      if (_repairIsEnLang() && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
+      return;
+    }
+
+    if (nextVal === origVal && !targetBlk._isDraft) {
+      _restoreFieldHost(ed, c, origVal);
+      if (options.jumpToFirstRow) {
+        if ((targetBlk.rows || []).length > 0) {
+          await startRepairBlockCellEdit(ed.caseId, ed.blkIdx, 0, 'label');
+        } else {
+          await addRepairBlockRowInline(ed.caseId, ed.blkIdx, true);
+        }
+      }
+      if (pane) pane.scrollTop = savedScroll;
+      if (_repairIsEnLang() && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
+      return;
+    }
+
+    const rollback = _cloneRepairBackup(c);
+    const { blocks: updatedBlocks, savedBlkIdx } = _normalizeBlocksForSaveWithTracking(
+      displayBlocks,
+      ed.blkIdx,
+      -1,
+      (b, bi) => (bi === ed.blkIdx ? { ...b, title: nextVal } : b)
+    );
+    const actualBlkIdx = savedBlkIdx >= 0 ? savedBlkIdx : Math.max(0, Math.min(ed.blkIdx, updatedBlocks.length - 1));
+    const savedBlk = updatedBlocks[actualBlkIdx];
+
+    if ((options.keepBlankDraft || options.jumpToFirstRow) && savedBlk && !savedBlk.rows.length) {
+      state.repairDraftBlocks[ed.caseId] = {
+        blocks: [],
+        rows: {
+          [savedBlk.id]: [{
+            id: `row-draft-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            label: '',
+            content: '',
+            _isDraft: true,
+            _insertAt: 0,
+          }],
+        },
+      };
+    } else if (state.repairDraftBlocks && state.repairDraftBlocks[ed.caseId]) {
+      delete state.repairDraftBlocks[ed.caseId];
+    }
+
+    c.repair_blocks_json = updatedBlocks;
+    c.fault_symptom_raw = _serializeRepairBlocksJS(updatedBlocks);
+    c.root_cause_raw = '';
+    c.solution_raw = '';
+    c.steps = [];
+
+    if (targetBlk._isDraft || !savedBlk || (options.jumpToFirstRow && savedBlk && !savedBlk.rows.length)) {
+      const blocksHost = document.querySelector('#repair-detail .rep-blocks-host');
+      if (blocksHost) blocksHost.innerHTML = renderRepairBlocksSectionHtml(c, true);
+    } else {
+      _restoreFieldHost(ed, c, nextVal);
+    }
+    if (pane) pane.scrollTop = savedScroll;
+
+    const patchPromise = patchRepairCaseInline(ed.caseId, { repair_blocks_json: updatedBlocks }, `rb-${Math.max(0, actualBlkIdx)}`, { rollback });
+    if (options.jumpToFirstRow && savedBlk) {
+      const curDisplay = _getDisplayRepairBlocksForCase(c);
+      if ((curDisplay[actualBlkIdx]?.rows || []).length > 0) {
+        await startRepairBlockCellEdit(ed.caseId, actualBlkIdx, 0, 'label');
+      } else {
+        await addRepairBlockRowInline(ed.caseId, actualBlkIdx, true);
+      }
+    }
+    await patchPromise;
+    return;
+  }
+
+  if (ed.target === 'rb-cell') {
+    const inp = ed.hostEl?.querySelector('.rb-inline-inp, .rb-inline-ta');
+    const nextVal = String(inp ? inp.value : '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+    const origVal = String(ed.origValue || '').trim();
+    state.repairInlineEdit = null;
+    const c = _getRepairCaseById(ed.caseId);
+    if (!c) return;
+
+    const displayBlocks = _getDisplayRepairBlocksForCase(c);
+    const targetBlk = displayBlocks[ed.blkIdx];
+    const targetRow = targetBlk?.rows?.[ed.rowIdx];
+    if (!targetBlk || !targetRow) return;
+
+    const nextLabel = ed.field === 'label' ? nextVal : String(targetRow.label || '').trim();
+    const nextContent = ed.field === 'content' ? nextVal : String(targetRow.content || '').trim();
+    const bothEmpty = !nextLabel && !nextContent;
+
+    if (bothEmpty && targetRow._isDraft) {
+      if (options.keepBlankDraftRow) {
+        _restoreFieldHost(ed, c, nextVal);
+        if (options.nextCell) {
+          await startRepairBlockCellEdit(options.nextCell.caseId, options.nextCell.blkIdx, options.nextCell.rowIdx, options.nextCell.field);
+        }
+        if (pane) pane.scrollTop = savedScroll;
+        return;
+      }
+      _removeDraftRepairRow(ed.caseId, targetBlk.id, Boolean(targetBlk._isDraft), targetRow.id);
+      const stillHasBlk = _getDisplayRepairBlocksForCase(c)[ed.blkIdx];
+      const blocksHost = document.querySelector('#repair-detail .rep-blocks-host');
+      if (blocksHost) blocksHost.innerHTML = renderRepairBlocksSectionHtml(c, true);
+      if (options.addRowAfter && stillHasBlk) {
+        await addRepairBlockRowInline(options.addRowAfter.caseId, ed.blkIdx, true, options.addRowAfter.afterIdx);
+      }
+      if (pane) pane.scrollTop = savedScroll;
+      if (_repairIsEnLang() && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
+      return;
+    }
+
+    if (nextVal === origVal && !targetRow._isDraft) {
+      _restoreFieldHost(ed, c, origVal);
+      if (options.nextCell) {
+        await startRepairBlockCellEdit(options.nextCell.caseId, options.nextCell.blkIdx, options.nextCell.rowIdx, options.nextCell.field);
+      } else if (options.addRowAfter) {
+        await addRepairBlockRowInline(options.addRowAfter.caseId, options.addRowAfter.blkIdx, true, options.addRowAfter.afterIdx + 1);
+      }
+      if (pane) pane.scrollTop = savedScroll;
+      if (_repairIsEnLang() && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
+      return;
+    }
+
+    const rollback = _cloneRepairBackup(c);
+    const { blocks: updatedBlocks, savedBlkIdx, savedRowIdx } = _normalizeBlocksForSaveWithTracking(
+      displayBlocks,
+      ed.blkIdx,
+      ed.rowIdx,
+      (b, bi) => {
+        if (bi !== ed.blkIdx) return b;
+        return {
+          ...b,
+          rows: (b.rows || []).map((r, ri) => (ri === ed.rowIdx ? { ...r, [ed.field]: nextVal } : r)),
+        };
+      }
+    );
+
+    if (state.repairDraftBlocks && state.repairDraftBlocks[ed.caseId]) {
+      delete state.repairDraftBlocks[ed.caseId];
+    }
+    c.repair_blocks_json = updatedBlocks;
+    c.fault_symptom_raw = _serializeRepairBlocksJS(updatedBlocks);
+    c.root_cause_raw = '';
+    c.solution_raw = '';
+    c.steps = [];
+
+    if (targetRow._isDraft || targetBlk._isDraft || bothEmpty) {
+      const blocksHost = document.querySelector('#repair-detail .rep-blocks-host');
+      if (blocksHost) blocksHost.innerHTML = renderRepairBlocksSectionHtml(c, true);
+    } else {
+      _restoreFieldHost(ed, c, nextVal);
+    }
+    if (pane) pane.scrollTop = savedScroll;
+
+    const patchPromise = patchRepairCaseInline(ed.caseId, { repair_blocks_json: updatedBlocks }, `rb-${Math.max(0, savedBlkIdx)}`, { rollback });
+    if (options.nextCell && savedBlkIdx >= 0 && savedRowIdx >= 0) {
+      await startRepairBlockCellEdit(options.nextCell.caseId, savedBlkIdx, savedRowIdx, options.nextCell.field);
+    } else if (options.addRowAfter && savedBlkIdx >= 0 && updatedBlocks[savedBlkIdx]) {
+      const insIdx = bothEmpty
+        ? Math.min(options.addRowAfter.afterIdx, updatedBlocks[savedBlkIdx].rows.length)
+        : Math.min((savedRowIdx >= 0 ? savedRowIdx : options.addRowAfter.afterIdx) + 1, updatedBlocks[savedBlkIdx].rows.length);
+      await addRepairBlockRowInline(options.addRowAfter.caseId, savedBlkIdx, true, insIdx);
+    }
+    await patchPromise;
+    return;
+  }
+
   const ta = ed.hostEl?.querySelector('.rep-inline-ta');
   const nextVal = String(ta ? ta.value : '').trim();
   const origVal = String(ed.origValue || '').trim();
@@ -1598,7 +2549,8 @@ function _syncRepairListRowDom(saved) {
   if (cEl) {
     delete cEl.dataset.viHtmlOrig;
     delete cEl.dataset.viTextOrig;
-    cEl.textContent = `${(saved.steps || []).length || 1} bước`;
+    const cnt = _resolveRepairBlocksForCase(saved).length;
+    cEl.textContent = `${cnt} mục`;
   }
 }
 
@@ -1651,31 +2603,44 @@ function _syncRepairDetailBlocksAfterPatch(saved, opts = {}) {
     if (noteHost) noteHost.innerHTML = renderRepairNoteBlockHtml(saved, true);
   }
 
-  const stepsSec = root.querySelector('.rep-steps-sec');
-  if (stepsSec) {
-    if (ed && ed.caseId === saved.id && ed.target === 'step') {
-      // Update only non-edited cells & header count so the active textarea never loses focus
-      const displaySteps = _getDisplayStepsForCase(saved);
-      const secTitle = stepsSec.querySelector('.sec-head .sec-title');
-      if (secTitle) {
-        delete secTitle.dataset.viHtmlOrig;
-        delete secTitle.dataset.viTextOrig;
-        secTitle.textContent = `QUY TRÌNH BẮT BỆNH & XỬ LÝ (${pad2(displaySteps.length)} BƯỚC)`;
-      }
-      displaySteps.forEach((st, idx) => {
-        ['symptom', 'root_cause', 'solution'].forEach((fld) => {
-          if (ed.stepIdx === idx && ed.field === fld) return;
-          const cell = stepsSec.querySelector(`.spec-v[data-step-idx="${idx}"][data-step-field="${fld}"]`);
-          if (cell) {
-            delete cell.dataset.viHtmlOrig;
-            delete cell.dataset.viTextOrig;
-            cell.innerHTML = _repairCellBodyHtml(st[fld], saved);
+  const blocksHost = root.querySelector('.rep-blocks-host');
+  if (blocksHost) {
+    if (ed && ed.caseId === saved.id && (ed.target === 'rb-title' || ed.target === 'rb-cell')) {
+      const displayBlocks = _getDisplayRepairBlocksForCase(saved);
+      const isEn = _repairIsEnLang();
+      const untitledPh = isEn ? 'Untitled section (click to edit)' : 'Chưa đặt tên mục (chạm để sửa)';
+      const labelPh = isEn ? 'Item / Test point...' : 'Hạng mục / Điểm đo...';
+      const contentPh = isEn ? 'Details / Result...' : 'Nội dung / Kết quả đo...';
+      displayBlocks.forEach((blk, bi) => {
+        if (!(ed.target === 'rb-title' && ed.blkIdx === bi)) {
+          const tEl = blocksHost.querySelector(`.rb-title[data-rb-title="${bi}"]`);
+          if (tEl) {
+            delete tEl.dataset.viHtmlOrig;
+            delete tEl.dataset.viTextOrig;
+            const ct = String(blk.title || '').trim();
+            tEl.innerHTML = ct ? escapeHtml(ct) : `<span class="rb-title-empty">${escapeHtml(untitledPh)}</span>`;
           }
+        }
+        (blk.rows || []).forEach((r, ri) => {
+          ['label', 'content'].forEach((fld) => {
+            if (ed.target === 'rb-cell' && ed.blkIdx === bi && ed.rowIdx === ri && ed.field === fld) return;
+            const cell = blocksHost.querySelector(`.rb-cell[data-rb-idx="${bi}"][data-rb-row="${ri}"][data-rb-field="${fld}"]`);
+            if (cell) {
+              delete cell.dataset.viHtmlOrig;
+              delete cell.dataset.viTextOrig;
+              cell.innerHTML = _repairBlockCellHtml(r[fld], saved, fld === 'label' ? labelPh : contentPh);
+            }
+          });
         });
       });
-    } else if (opts.reRenderSteps !== false) {
-      stepsSec.innerHTML = renderRepairStepsSectionInnerHtml(saved, true);
+    } else if (opts.reRenderBlocks !== false) {
+      blocksHost.innerHTML = renderRepairBlocksSectionHtml(saved, true);
     }
+  }
+
+  if (typeof invalidateBilingualHostCache === 'function') {
+    invalidateBilingualHostCache(`rb-bilingual-${saved.id}-`);
+    invalidateBilingualHostCache(`repair-bilingual-host-${saved.id}`);
   }
 
   const mobIdEl = document.getElementById('mob-detail-id');
@@ -1730,7 +2695,7 @@ async function patchRepairCaseInline(caseId, patchPayload, statusKey = 'cold', o
           _applyRepairBackup(cur, opts.rollback);
           _recomputeRepairTagsDictionary();
           _syncRepairListRowDom(cur);
-          _syncRepairDetailBlocksAfterPatch(cur, { reRenderSteps: true });
+          _syncRepairDetailBlocksAfterPatch(cur, { reRenderBlocks: true });
           if (isEn && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
         }
       }
@@ -1746,100 +2711,11 @@ async function patchRepairCaseInline(caseId, patchPayload, statusKey = 'cold', o
 }
 
 async function addRepairStepInline(caseId) {
-  if (state.repairInlineEdit) await commitActiveRepairInlineEdit();
-  const c = _getRepairCaseById(caseId);
-  if (!c) return;
-  const pane = document.getElementById('repair-detail');
-  const savedScroll = pane ? pane.scrollTop : 0;
-
-  const displaySteps = _getDisplayStepsForCase(c);
-  const lastStep = displaySteps[displaySteps.length - 1];
-  const lastEmpty = lastStep && !String(lastStep.symptom || '').trim() && !String(lastStep.root_cause || '').trim() && !String(lastStep.solution || '').trim();
-
-  let targetIdx = displaySteps.length - 1;
-  if (!lastEmpty) {
-    state.repairDraftSteps[caseId] = state.repairDraftSteps[caseId] || [];
-    state.repairDraftSteps[caseId].push({
-      step_order: displaySteps.length + 1,
-      symptom: '',
-      root_cause: '',
-      solution: '',
-      _isDraft: true,
-    });
-    targetIdx = displaySteps.length;
-    const stepsSec = document.querySelector('#repair-detail .rep-steps-sec');
-    if (stepsSec) {
-      stepsSec.innerHTML = renderRepairStepsSectionInnerHtml(c, true);
-    }
-  }
-  if (pane) pane.scrollTop = savedScroll;
-  await startRepairStepFieldEdit(caseId, targetIdx, 'symptom');
-  const stepEl = document.querySelector(`#repair-detail .step[data-step-idx="${targetIdx}"]`);
-  if (stepEl && typeof stepEl.scrollIntoView === 'function') {
-    stepEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }
-  if (_repairIsEnLang() && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
+  return addRepairBlockInline(caseId);
 }
 
 async function deleteRepairStepInline(caseId, stepIdx) {
-  const cur = state.repairInlineEdit;
-  if (cur && cur.caseId === caseId && cur.target === 'step' && cur.stepIdx === stepIdx) {
-    cur.cancelling = true;
-    state.repairInlineEdit = null;
-  } else if (cur) {
-    await commitActiveRepairInlineEdit();
-  }
-  const c = _getRepairCaseById(caseId);
-  if (!c) return;
-  const displaySteps = _getDisplayStepsForCase(c);
-  const target = displaySteps[stepIdx];
-  if (!target) return;
-
-  const hasText = Boolean(String(target.symptom || '').trim() || String(target.root_cause || '').trim() || String(target.solution || '').trim());
-  const isEn = _repairIsEnLang();
-  if (hasText && !await uiConfirm(isEn ? `Delete STEP ${pad2(stepIdx + 1)}?` : `Xóa BƯỚC ${pad2(stepIdx + 1)} này?`)) {
-    return;
-  }
-
-  const pane = document.getElementById('repair-detail');
-  const savedScroll = pane ? pane.scrollTop : 0;
-
-  if (target._placeholder) {
-    showToast(isEn ? 'Step 01 is empty and ready to edit' : 'Bước 01 đang trống, chạm để nhập nội dung', 'info');
-    return;
-  }
-
-  if (target._isDraft) {
-    const savedCount = Math.max(0, displaySteps.length - (state.repairDraftSteps[caseId]?.length || 0));
-    const draftIdx = stepIdx - savedCount;
-    if (state.repairDraftSteps[caseId] && draftIdx >= 0) {
-      state.repairDraftSteps[caseId].splice(draftIdx, 1);
-    }
-    const stepsSec = document.querySelector('#repair-detail .rep-steps-sec');
-    if (stepsSec) stepsSec.innerHTML = renderRepairStepsSectionInnerHtml(c, true);
-    if (pane) pane.scrollTop = savedScroll;
-    if (isEn && typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
-    return;
-  }
-
-  const rollback = _cloneRepairBackup(c);
-  const nextSaved = displaySteps
-    .filter((_, i) => i !== stepIdx)
-    .filter((s) => !s._isDraft && !s._placeholder)
-    .map((s, i) => ({
-      step_order: i + 1,
-      symptom: s.symptom || '',
-      root_cause: s.root_cause || '',
-      solution: s.solution || '',
-    }));
-
-  c.steps = nextSaved;
-  if (state.repairDraftSteps && state.repairDraftSteps[caseId]) {
-    delete state.repairDraftSteps[caseId];
-  }
-  await patchRepairCaseInline(caseId, { steps: nextSaved }, 'step-0', { reRenderSteps: true, rollback });
-  if (pane) pane.scrollTop = savedScroll;
-  showToast(isEn ? `Deleted step ${pad2(stepIdx + 1)}` : `Đã xóa Bước ${pad2(stepIdx + 1)}`, 'success');
+  return deleteRepairBlockInline(caseId, stepIdx);
 }
 
 function openRepairTagInput(caseId, kind) {

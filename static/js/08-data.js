@@ -56,6 +56,7 @@ async function deleteRecord(parentType, id) {
     }
     if (state.repairTagAdd && state.repairTagAdd.caseId === id) state.repairTagAdd = null;
     if (state.repairDraftSteps) delete state.repairDraftSteps[id];
+    if (state.repairDraftBlocks) delete state.repairDraftBlocks[id];
     if (state.repairDraftColdRows) delete state.repairDraftColdRows[id];
   }
   const endpointMap = {
@@ -289,18 +290,18 @@ function insertColdCheckTemplateToModal() {
   firstRow?.querySelector('.rep-cc-res-inp')?.focus();
 }
 
-function openRepairModal(caseId = null, appendBlankStep = false) {
+function openRepairModal(caseId = null, appendBlankBlock = false) {
   if (typeof flushActiveRepairInlineEdit === 'function') flushActiveRepairInlineEdit();
   const modal = document.getElementById('repair-modal');
   const form = document.getElementById('repair-form');
   const title = document.getElementById('repair-modal-title').querySelector('span');
-  const container = document.getElementById('rep-form-steps-container');
+  const container = document.getElementById('rep-form-blocks-container');
   const coldContainer = document.getElementById('rep-form-cold-container');
   const advDetails = document.getElementById('rep-form-advanced');
   const tagsWrap = document.getElementById('rep-form-tags-wrap');
   const coldLbl = document.getElementById('rep-form-cold-lbl');
   const submitBtn = document.getElementById('rep-form-submit-btn');
-  container.innerHTML = '';
+  if (container) container.innerHTML = '';
   if (coldContainer) coldContainer.innerHTML = '';
   if (caseId) {
     const c = state.repairCases.find((x) => x.id === caseId);
@@ -324,9 +325,11 @@ function openRepairModal(caseId = null, appendBlankStep = false) {
     tagsWrap?.classList.remove('hidden');
     if (coldLbl) coldLbl.textContent = 'Tiếp nhận & Đo nguội (Cold Check)';
     if (submitBtn) submitBtn.textContent = 'Lưu ca sửa chữa';
-    const steps = c.steps && c.steps.length ? c.steps : [{ symptom: c.fault_symptom_raw, root_cause: c.root_cause_raw, solution: c.solution_raw }];
-    steps.forEach((s) => addRepairStepRow(s));
-    if (appendBlankStep) addRepairStepRow({ symptom: '', root_cause: '', solution: '' });
+    const blocks = (typeof _resolveRepairBlocksForCase === 'function')
+      ? _resolveRepairBlocksForCase(c)
+      : (window.MRLCoreStore?.convertLegacyStepsToBlocks ? window.MRLCoreStore.convertLegacyStepsToBlocks(c, c.steps) : []);
+    blocks.forEach((blk) => addModalRepairBlock(blk));
+    if (appendBlankBlock) addModalRepairBlock({ title: '', rows: [{ label: '', content: '' }] });
   } else {
     form?.classList.remove('mode-edit');
     form?.classList.add('mode-create');
@@ -343,7 +346,6 @@ function openRepairModal(caseId = null, appendBlankStep = false) {
     tagsWrap?.classList.add('hidden');
     if (coldLbl) coldLbl.textContent = 'Tiếp nhận & Đo nguội ban đầu (tùy chọn)';
     if (submitBtn) submitBtn.textContent = 'Tạo ca & Bắt đầu đo';
-    addRepairStepRow({ symptom: '', root_cause: '', solution: '' });
   }
   modal.classList.remove('hidden');
   if (typeof applyFullAppLocalization === 'function') applyFullAppLocalization();
@@ -353,43 +355,72 @@ function openRepairModal(caseId = null, appendBlankStep = false) {
 }
 function closeRepairModal() { document.getElementById('repair-modal').classList.add('hidden'); }
 
-function addRepairStepRow(step = { symptom: '', root_cause: '', solution: '' }) {
-  const container = document.getElementById('rep-form-steps-container');
-  const row = document.createElement('div');
-  row.className = 'rep-step-row step-edit';
-  row.innerHTML = `
-    <div class="step-edit-head"><span class="step-badge">BƯỚC</span><button type="button" onclick="removeRepairStepRow(this)">Xóa</button></div>
-    <div class="fgrid c3">
-      <div><label class="lbl">Hiện tượng / Điểm đo</label><textarea rows="3" class="inp step-symptom">${escapeHtml(step.symptom || '')}</textarea></div>
-      <div><label class="lbl">Nguyên nhân gốc rễ</label><textarea rows="3" class="inp step-cause">${escapeHtml(step.root_cause || '')}</textarea></div>
-      <div><label class="lbl">Cách xử lý &amp; Linh kiện</label><textarea rows="3" class="inp step-solution">${escapeHtml(step.solution || '')}</textarea></div>
-    </div>`;
-  container.appendChild(row);
-  renumberRepairStepRows();
+function addModalRepairBlockRow(rowsHost, row = { id: '', label: '', content: '' }) {
+  if (!rowsHost) return;
+  const rEl = document.createElement('div');
+  rEl.className = 'rep-modal-rb-row';
+  rEl.dataset.rowId = row.id || '';
+  rEl.innerHTML = `
+    <input type="text" class="inp rep-modal-rb-label" placeholder="Hạng mục / Điểm đo" />
+    <textarea rows="2" class="inp rep-modal-rb-content" placeholder="Nội dung / Kết quả"></textarea>
+    <button type="button" class="cc-del-btn modal-rb-del" onclick="removeModalRepairBlockRow(this)" title="Xóa dòng" aria-label="Xóa dòng">×</button>`;
+  rEl.querySelector('.rep-modal-rb-label').value = row.label || '';
+  rEl.querySelector('.rep-modal-rb-content').value = row.content || '';
+  rowsHost.appendChild(rEl);
 }
-function removeRepairStepRow(btn) {
-  const container = document.getElementById('rep-form-steps-container');
-  if (container.querySelectorAll('.rep-step-row').length <= 1) { showToast('Cần ít nhất 1 bước', 'error'); return; }
-  btn.closest('.rep-step-row').remove();
-  renumberRepairStepRows();
+
+function removeModalRepairBlockRow(btn) {
+  btn.closest('.rep-modal-rb-row')?.remove();
 }
-function renumberRepairStepRows() {
-  document.querySelectorAll('#rep-form-steps-container .rep-step-row').forEach((r, i) => {
-    r.querySelector('.step-badge').textContent = `BƯỚC ${pad2(i + 1)}`;
+
+function addModalRepairBlock(block = null) {
+  const container = document.getElementById('rep-form-blocks-container');
+  if (!container) return;
+  const data = block || { id: '', title: '', rows: [{ id: '', label: '', content: '' }] };
+  const card = document.createElement('div');
+  card.className = 'rep-modal-rb-card';
+  card.dataset.rbId = data.id || '';
+  card.innerHTML = `
+    <div class="rep-modal-rb-head">
+      <input type="text" class="inp rep-modal-rb-title" placeholder="Tên mục lớn (VD: TEST NGUỒN XUNG & CẤP DC BUS)..." />
+      <button type="button" class="btn btn-sm btn-primary" onclick="addModalRepairBlockRow(this.closest('.rep-modal-rb-card').querySelector('.rep-modal-rb-rows'))">+ Thêm dòng</button>
+      <button type="button" class="btn btn-sm btn-danger" onclick="removeModalRepairBlock(this)">Xóa mục</button>
+    </div>
+    <div class="rep-modal-rb-rows"></div>`;
+  card.querySelector('.rep-modal-rb-title').value = data.title || '';
+  const rowsHost = card.querySelector('.rep-modal-rb-rows');
+  const rows = Array.isArray(data.rows) && data.rows.length ? data.rows : (block ? [] : [{ id: '', label: '', content: '' }]);
+  rows.forEach((r) => addModalRepairBlockRow(rowsHost, r));
+  container.appendChild(card);
+  if (!block) {
+    card.querySelector('.rep-modal-rb-title')?.focus();
+  }
+}
+
+function removeModalRepairBlock(btn) {
+  btn.closest('.rep-modal-rb-card')?.remove();
+}
+
+function collectModalRepairBlocks() {
+  const cards = Array.from(document.querySelectorAll('#rep-form-blocks-container .rep-modal-rb-card'));
+  const raw = cards.map((card, bi) => {
+    const title = (card.querySelector('.rep-modal-rb-title')?.value || '').trim();
+    const rows = Array.from(card.querySelectorAll('.rep-modal-rb-row')).map((rEl, ri) => ({
+      id: rEl.dataset.rowId || `row-${ri + 1}`,
+      label: (rEl.querySelector('.rep-modal-rb-label')?.value || '').trim(),
+      content: (rEl.querySelector('.rep-modal-rb-content')?.value || '').trim(),
+    }));
+    return { id: card.dataset.rbId || `blk-${bi + 1}`, title, rows };
   });
+  return (window.MRLCoreStore && typeof window.MRLCoreStore.normalizeRepairBlocks === 'function')
+    ? window.MRLCoreStore.normalizeRepairBlocks(raw)
+    : raw.filter((b) => b.title || b.rows.some((r) => r.label || r.content));
 }
 
 async function submitRepairForm(event) {
   event.preventDefault();
   const id = document.getElementById('rep-form-id').value.trim();
-  const steps = Array.from(document.querySelectorAll('#rep-form-steps-container .rep-step-row'))
-    .map((r) => ({
-      symptom: r.querySelector('.step-symptom').value.trim(),
-      root_cause: r.querySelector('.step-cause').value.trim(),
-      solution: r.querySelector('.step-solution').value.trim(),
-    }))
-    .filter((s) => s.symptom || s.root_cause || s.solution)
-    .map((s, i) => ({ step_order: i + 1, ...s }));
+  const blocks = collectModalRepairBlocks();
   const csv = (v) => v.split(',').map((s) => s.trim().replace(/^#/, '')).filter(Boolean);
   const coldRows = collectModalColdCheckRows();
   const coldRaw = (window.MRLCoreStore && typeof window.MRLCoreStore.serializeColdCheckRowsToText === 'function')
@@ -405,7 +436,7 @@ async function submitRepairForm(event) {
     note: document.getElementById('rep-form-note').value.trim(),
     component_tags: id ? csv(document.getElementById('rep-form-tags').value) : [],
     fault_codes: csv(document.getElementById('rep-form-faults').value),
-    steps,
+    repair_blocks_json: blocks,
   };
   try {
     const res = await fetch(id ? `/api/repair-cases/${encodeURIComponent(id)}` : '/api/repair-cases', {
@@ -415,6 +446,7 @@ async function submitRepairForm(event) {
     const saved = await res.json();
     closeRepairModal();
     if (state.repairDraftSteps) delete state.repairDraftSteps[saved.id];
+    if (state.repairDraftBlocks) delete state.repairDraftBlocks[saved.id];
     if (state.repairFilters.category !== 'ALL' && state.repairFilters.category !== saved.device_category) {
       state.repairFilters.category = 'ALL';
     }

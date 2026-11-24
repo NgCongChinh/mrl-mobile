@@ -99,6 +99,7 @@ const state = {
   repairTagAdd: null,
   repairDraftSteps: {},
   repairDraftColdRows: {},
+  repairDraftBlocks: {},
   tagsDictionary: { component_tags: [], fault_codes: [] },
   selectedRepairId: null,
   selectedKnowledgeId: null,

@@ -156,6 +156,15 @@ const UI_I18N_MAP = {
   '+ Thêm mạng': '+ Add Network',
   '+ Thêm cấu hình mạng': '+ Add Network',
   '+ Thêm bước kiểm tra': '+ Add Check Step',
+  'Thêm mục mới': 'Add Section',
+  '+ Thêm mục mới': '+ Add Section',
+  'Thêm dòng': 'Add row',
+  'Xóa mục': 'Delete',
+  'Song ngữ': 'Bilingual',
+  'Chạm để thêm dòng đầu tiên...': 'Click to add first row...',
+  'Chưa đặt tên mục (chạm để sửa)': 'Untitled section (click to edit)',
+  'CÁC MỤC NỘI DUNG (BẢNG 2 CỘT)': 'CUSTOM CONTENT SECTIONS (2-COLUMN)',
+  '▸ Thêm ngay Các mục nội dung (Bảng 2 cột) / Lưu ý nguồn': '▸ Add Custom Sections (2-Col) / Bench Notes',
   '+ Thêm mục mới ngay tại đây (viết chữ · dán ảnh Ctrl+V)': '+ Add New Section Here (type notes · Ctrl+V paste image)',
   'Nhật ký ca sửa chữa biến tần, bo mạch, HMI, Servo; Kiến thức đo kiểm SOP & Từ điển linh kiện / mã lỗi.': 'Repair logs for VFD, PCBA, HMI & Servo; SOP diagnostics and component/fault code dictionary.',
   'Lập trình & Hệ thống PLC Siemens TIA Portal: khối hàm FB/FC/OB, vùng nhớ DB/UDT, Analog 4-20mA & PID, Đấu nối.': 'PLC Programming & TIA Portal: FB/FC/OB blocks, DB/UDT memory, 4-20mA Analog & PID, Physical Wiring.',
@@ -734,6 +743,13 @@ const PLACEHOLDER_I18N_MAP = {
   'Kết quả / Thông số đo (Enter xuống dòng, Ctrl+Enter thêm dòng)...': 'Result / Measurements (Enter newline, Ctrl+Enter new row)...',
   'Thành phần (VD: Tụ lọc, Opto)...': 'Component (e.g. Cap, Opto)...',
   'Thông số đo / Kết quả...': 'Measurement / Result...',
+  'Hạng mục / Điểm đo...': 'Item / Test point...',
+  'Nội dung / Kết quả (Enter xuống dòng, Ctrl+Enter thêm dòng)...': 'Content / Measurements (Enter newline, Ctrl+Enter add row)...',
+  'Tên mục lớn (VD: TEST NGUỒN XUNG & CẤP DC BUS)...': 'Section title (e.g. SMPS & DC BUS TEST)...',
+  'Tên mục (VD: TEST NGUỒN XUNG & CẤP DC BUS)...': 'Section title (e.g. SMPS & DC BUS TEST)...',
+  'Hạng mục / Điểm đo': 'Item / Test point',
+  'Nội dung / Kết quả': 'Content / Result',
+  'Nội dung / Kết quả đo...': 'Details / Result...',
 };
 
 let _SORTED_I18N_ENTRIES = null;
@@ -759,6 +775,7 @@ function _translateUiString(raw) {
     [/^(\d+)\s+cấu hình$/i, '$1 configs'],
     [/^(\d+)\s+ảnh$/i, '$1 imgs'],
     [/^(\d+)\s+bước$/i, '$1 steps'],
+    [/^(\d+)\s+mục$/i, '$1 sections'],
     [/^(\d+)\s+bài$/i, '$1 items'],
     [/^(\d+)\s+thanh ghi$/i, '$1 regs'],
     [/^Ca sửa:\s*(.+)$/i, 'Repair: $1'],
@@ -1067,6 +1084,12 @@ function _translateUiLeafNodes(rootEl, toEn) {
     '.detail-pane .cc-cell-result',
     '.detail-pane .cc-cell-caps',
     '.cc-cap-grid',
+    '.detail-pane .rb-title',
+    '.detail-pane .rb-cell-label',
+    '.detail-pane .rb-cell-content',
+    '.rb-inline-inp',
+    '.rb-inline-ta',
+    '.rb-title-inp',
     '.detail-pane .warn-body',
     '.detail-pane .nb-body',
     '.rep-inline-editor',
@@ -1280,6 +1303,9 @@ async function translateVisibleRecordContentToEn() {
     '#app-shell .detail-pane .cold-check-body',
     '#app-shell .detail-pane .cc-cell-item',
     '#app-shell .detail-pane .cc-cell-result',
+    '#app-shell .detail-pane .rb-title',
+    '#app-shell .detail-pane .rb-cell-label',
+    '#app-shell .detail-pane .rb-cell-content',
     '#app-shell .detail-pane .warn-body',
     '#app-shell .detail-pane .nb-body',
     '#app-shell .detail-pane .spec-v',
@@ -1295,7 +1321,7 @@ async function translateVisibleRecordContentToEn() {
 
   const targets = [];
   document.querySelectorAll(selectors.join(', ')).forEach((el) => {
-    if (el.closest('.hidden') || el.closest('#view-en-vocab-bank') || el.querySelector('.inline-empty-prompt, .none') || el.closest('.bilingual-sec-wrap') || el.closest('.rep-inline-editing, .uni-inline-editing, #inline-sec-editor-box, .cc-cell-caps, .cc-cap-grid, [data-has-custom-en="1"], [data-no-i18n="1"]') || el.dataset.hasCustomEn === '1' || el.dataset.noI18n === '1' || el.querySelector('.rep-inline-editor, .uni-inline-editor, .cc-cap-grid')) return;
+    if (el.closest('.hidden') || el.closest('#view-en-vocab-bank') || el.querySelector('.inline-empty-prompt, .none, .rb-title-empty') || el.closest('.bilingual-sec-wrap') || el.closest('.rep-inline-editing, .uni-inline-editing, #inline-sec-editor-box, .cc-cell-caps, .cc-cap-grid, [data-has-custom-en="1"], [data-no-i18n="1"]') || el.dataset.hasCustomEn === '1' || el.dataset.noI18n === '1' || el.querySelector('.rep-inline-editor, .uni-inline-editor, .cc-cap-grid')) return;
     if (el.classList.contains('row-step-count') && el.closest('#plc-list, #network-list')) return;
     if (el.dataset.viHtmlOrig === undefined) {
       el.dataset.viHtmlOrig = el.innerHTML;
@@ -1303,9 +1329,9 @@ async function translateVisibleRecordContentToEn() {
     }
     const rawText = (el.dataset.viTextOrig || '').trim();
     if (!rawText) return;
-    const isMultiLine = el.classList.contains('detail-canvas-text') || el.classList.contains('cold-check-body') || el.classList.contains('cc-cell-result') || el.classList.contains('warn-body') || el.classList.contains('nb-body') || el.classList.contains('spec-v') || el.classList.contains('fc-question-text');
+    const isMultiLine = el.classList.contains('detail-canvas-text') || el.classList.contains('cold-check-body') || el.classList.contains('cc-cell-result') || el.classList.contains('rb-cell-content') || el.classList.contains('warn-body') || el.classList.contains('nb-body') || el.classList.contains('spec-v') || el.classList.contains('fc-question-text');
     const lines = isMultiLine ? String(el.dataset.viTextOrig).split('\n') : [rawText];
-    targets.push({ el, lines, isPlainTitle: el.classList.contains('row-title') || el.classList.contains('row-step-count') || el.classList.contains('d-title') || el.tagName === 'SPAN' || el.tagName === 'LI' });
+    targets.push({ el, lines, isPlainTitle: el.classList.contains('row-title') || el.classList.contains('row-step-count') || el.classList.contains('d-title') || el.classList.contains('rb-title') || el.tagName === 'SPAN' || el.tagName === 'LI' });
   });
 
   const missingSet = new Set();
@@ -1972,6 +1998,13 @@ async function toggleSectionBilingual(secKey, forceOpen = null) {
   }
 }
 
+function invalidateBilingualHostCache(prefix) {
+  if (!prefix) return;
+  Object.keys(_enRecordBilingualCache).forEach((k) => {
+    if (k === prefix || k.startsWith(prefix)) delete _enRecordBilingualCache[k];
+  });
+}
+
 async function _toggleCustomHostBilingual(hostId, title, lines, recordId) {
   const host = document.getElementById(hostId);
   if (!host) return;
@@ -2026,15 +2059,19 @@ async function toggleCurrentRecordBilingual(explicitKind = null, explicitId = nu
     const id = explicitId || state.selectedRepairId;
     const c = state.repairCases.find((x) => x.id === id);
     if (!c) return;
-    const steps = c.steps && c.steps.length ? c.steps : [{ step_order: 1, symptom: c.fault_symptom_raw, root_cause: c.root_cause_raw, solution: c.solution_raw }];
+    const blocks = window.MRLCoreStore?.convertLegacyStepsToBlocks
+      ? window.MRLCoreStore.convertLegacyStepsToBlocks(c, c.steps)
+      : (Array.isArray(c.repair_blocks_json) ? c.repair_blocks_json : []);
     const lines = [c.brand_model];
     if (c.cold_check_raw) lines.push(`Tiếp nhận & Đo nguội: ${c.cold_check_raw}`);
-    if (c.note) lines.push(`Lưu ý: ${c.note}`);
-    steps.forEach((s, idx) => {
-      if (s.symptom) lines.push(`Bước ${idx + 1} - Hiện tượng: ${s.symptom}`);
-      if (s.root_cause) lines.push(`Bước ${idx + 1} - Nguyên nhân: ${s.root_cause}`);
-      if (s.solution) lines.push(`Bước ${idx + 1} - Cách xử lý: ${s.solution}`);
+    blocks.forEach((blk, bi) => {
+      if (blk.title) lines.push(`[${blk.title}]`);
+      (blk.rows || []).forEach((r) => {
+        if (r.label && r.content) lines.push(`${r.label}: ${r.content}`);
+        else if (r.label || r.content) lines.push(r.label || r.content);
+      });
     });
+    if (c.note) lines.push(`Lưu ý: ${c.note}`);
     await _toggleCustomHostBilingual(`repair-bilingual-host-${id}`, c.id, lines, c.id);
     return;
   }
